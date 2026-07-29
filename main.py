@@ -77,7 +77,7 @@ def cmd_run(once: bool = False) -> None:
             broker._open[t.id] = t
     try:
         acct = broker.get_account()
-        risk.peak_equity = max(risk.peak_equity, acct.equity)
+        risk.peak_equity = max(acct.equity, 0.01)  # use real balance, not hardcoded starting_equity
     except Exception:
         pass
 
