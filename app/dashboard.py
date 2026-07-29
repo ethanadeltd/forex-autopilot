@@ -1,0 +1,388 @@
+from __future__ import annotations
+
+from fastapi import FastAPI, Form
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+
+from app.broker.factory import make_broker
+from app.config import get_settings
+from app.data.store import Store
+from app.runtime import is_running, pid, request_stop, wait_for_stop
+from app.settings_manager import TraderSettings, load_settings, save_settings, settings_schema
+from app.strategies.registry import list_strategies
+from app.strategy_state import get_selected_strategy_id, set_selected_strategy_id
+
+app = FastAPI(title="AI Forex Autopilot Monitor")
+
+
+def _page() -> str:
+    settings = get_settings()
+    store = Store(settings.db_path)
+    selected = get_selected_strategy_id(settings.strategy_id)
+    presets = list_strategies()
+    running = is_running()
+    bot_pid = pid()
+
+    account = None
+    err = ""
+    try:
+        broker = make_broker(settings)
+        if settings.trading_mode == "paper" and hasattr(broker, "_open"):
+            for t in store.open_trades():
+                broker._open[t.id] = t
+        account = broker.get_account()
+        if hasattr(broker, "shutdown"):
+            broker.shutdown()
+    except Exception as exc:
+        err = str(exc)
+
+    ts = load_settings()
+    opens = store.open_trades()
+    events = store.recent_events(30)
+    closed = [t for t in store.list_trades() if t.status.value == "closed"][-20:]
+    selected_meta = next((p for p in presets if p["id"] == selected), presets[0])
+
+    # Status badge
+    status_badge = (
+        f'<span class="badge-running">RUNNING (PID {bot_pid})</span>'
+        if running
+        else '<span class="badge-stopped">STOPPED</span>'
+    )
+    stop_btn = (
+        '<form method="post" action="/stop" style="display:inline"><button class="danger">STOP BOT</button></form>'
+        if running
+        else ""
+    )
+
+    def rows_trades(items):
+        if not items:
+            return "<tr><td colspan='9'>None</td></tr>"
+        out = []
+        for t in items:
+            opened = t.opened_at.strftime('%m-%d %H:%M') if hasattr(t, 'opened_at') and t.opened_at else '-'
+            closed = t.closed_at.strftime('%m-%d %H:%M') if hasattr(t, 'closed_at') and t.closed_at else '-'
+            pnl = getattr(t, 'pnl', 0)
+            pnl_style = 'color:#7dffa6' if pnl > 0 else ('color:#ff8e8e' if pnl < 0 else '')
+            out.append(
+                "<tr>"
+                f"<td>{t.instrument}</td>"
+                f"<td>{t.side.value}</td>"
+                f"<td>{t.entry_price}</td>"
+                f"<td>{t.stop_loss}</td>"
+                f"<td>{t.take_profit}</td>"
+                f"<td style='{pnl_style}'>{pnl:.2f}</td>"
+                f"<td>{opened}</td>"
+                f"<td>{closed}</td>"
+                "</tr>"
+            )
+        return "".join(out)
+
+    def rows_events(items):
+        if not items:
+            return "<tr><td colspan='3'>None</td></tr>"
+        out = []
+        for e in items:
+            out.append(
+                "<tr>"
+                f"<td>{e.ts.isoformat(timespec='seconds')}</td>"
+                f"<td>{e.level}</td>"
+                f"<td>{e.message}</td>"
+                "</tr>"
+            )
+        return "".join(out)
+
+    options = []
+    for p in presets:
+        sel = "selected" if p["id"] == selected else ""
+        options.append(f'<option value="{p["id"]}" {sel}>{p["name"]}</option>')
+
+    equity = f"{account.equity:.2f}" if account else "-"
+    balance = f"{account.balance:.2f}" if account else "-"
+    open_n = account.open_trades if account else len(opens)
+
+    # Settings form fields
+    schema = settings_schema()
+    fields_html = ""
+    current_instruments = [x.strip() for x in settings.instruments.split(",") if x.strip()]
+    all_instruments = ["EUR_USD", "GBP_USD", "XAU_USD"]
+    for f in schema:
+        key = f["key"]
+        default = f["default"]
+        val = getattr(ts, key, default)
+        lbl = f["label"]
+        
+        # Special case: instruments as checkboxes
+        if key == "instruments":
+            cb = "".join(
+                f'<label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;cursor:pointer">'
+                f'<input type="checkbox" name="instr_{inst}" value="1" {"checked" if inst in current_instruments else ""} '
+                f'style="width:18px;height:18px;cursor:pointer"> {inst}'
+                f'</label>'
+                for inst in all_instruments
+            )
+            fields_html += f'<div class="field"><label>Instruments (uncheck to disable)</label><div>{cb}</div></div>'
+        elif f["type"] == "select":
+            opts = "".join(
+                f'<option value="{o["value"]}" {"selected" if o["value"] == str(val) else ""}>{o["label"]}</option>'
+                for o in f["options"]
+            )
+            fields_html += f'<div class="field"><label>{lbl}</label><select name="{key}">{opts}</select></div>'
+        elif f["type"] == "float":
+            step = f.get("step", 0.1)
+            fields_html += (
+                f'<div class="field"><label>{lbl}</label>'
+                f'<input type="number" name="{key}" value="{val}" min="{f["min"]}" max="{f["max"]}" step="{step}" />'
+                f'</div>'
+            )
+        elif f["type"] == "int":
+            fields_html += (
+                f'<div class="field"><label>{lbl}</label>'
+                f'<input type="number" name="{key}" value="{val}" min="{f["min"]}" max="{f["max"]}" step="1" />'
+                f'</div>'
+            )
+        else:
+            hint = f.get("hint", "")
+            hint_html = f'<span class="hint">{hint}</span>' if hint else ""
+            fields_html += (
+                f'<div class="field"><label>{lbl}</label>'
+                f'<input type="text" name="{key}" value="{val}" />{hint_html}'
+                f'</div>'
+            )
+
+    return f"""
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="refresh" content="15" />
+  <title>Forex Autopilot</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; background:#0b1220; color:#e8eefc; }}
+    h1,h2,h3 {{ margin: 0 0 12px; }}
+    a {{ color:#8cbcff; }}
+    .card {{ background:#121a2b; border:1px solid #243251; border-radius:12px; padding:16px; margin-bottom:16px; }}
+    .grid {{ display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:12px; }}
+    .metric {{ background:#0f1726; border-radius:10px; padding:12px; }}
+    .label {{ color:#9db0d0; font-size:12px; }}
+    .value {{ font-size:22px; font-weight:700; margin-top:4px; }}
+    table {{ width:100%; border-collapse: collapse; }}
+    th, td {{ text-align:left; padding:8px 6px; border-bottom:1px solid #243251; font-size:14px; }}
+    th {{ color:#9db0d0; font-weight:600; }}
+    .err {{ color:#ff8e8e; }}
+    .ok {{ color:#7dffa6; }}
+    .badge-running {{ background:#173a1e; color:#7dffa6; padding:6px 14px; border-radius:20px; font-weight:600; font-size:14px; }}
+    .badge-stopped {{ background:#3a1717; color:#ff8e8e; padding:6px 14px; border-radius:20px; font-weight:600; font-size:14px; }}
+    select, input, button {{ background:#0f1726; color:#e8eefc; border:1px solid #3a4d73; border-radius:8px; padding:10px 12px; font-size:14px; }}
+    button {{ cursor:pointer; background:#1d4ed8; border-color:#1d4ed8; font-weight:600; }}
+    .danger {{ background:#b91c1c; border-color:#b91c1c; }}
+    .row {{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }}
+    .muted {{ color:#9db0d0; }}
+    .tabs {{ display:flex; gap:4px; margin-bottom:16px; }}
+    .tab {{ padding:10px 18px; border-radius:8px 8px 0 0; cursor:pointer; background:#0f1726; border:1px solid #243251; border-bottom:none; }}
+    .tab.active {{ background:#121a2b; font-weight:600; border-color:#3a4d73; }}
+    .tab-content {{ display:none; }}
+    .tab-content.show {{ display:block; }}
+    .settings-grid {{ display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:12px; }}
+    .field {{ margin-bottom:10px; }}
+    .field label {{ display:block; font-size:13px; color:#9db0d0; margin-bottom:4px; }}
+    .field input, .field select {{ width:100%; }}
+    .hint {{ color:#6b80a0; font-size:11px; margin-left:6px; }}
+    pre {{ background:#0a0f1a; padding:12px; border-radius:8px; overflow-x:auto; font-size:12px; }}
+  </style>
+  <script>
+  function switchTab(name) {{
+    document.querySelectorAll('.tab-content').forEach(e => e.classList.remove('show'));
+    document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('show');
+    document.querySelector(`[data-tab="${{name}}"]`).classList.add('active');
+    localStorage.setItem('autopilot-tab', name);
+  }}
+  document.addEventListener('DOMContentLoaded', () => {{
+    const saved = localStorage.getItem('autopilot-tab');
+    if (saved) switchTab(saved);
+  }});
+  </script>
+</head>
+<body>
+
+<div class="row" style="justify-content:space-between; margin-bottom:16px;">
+  <div>
+    <h1 style="display:inline">AI Forex Autopilot</h1>
+    <span style="margin-left:12px;">{status_badge} {stop_btn}</span>
+    <p class="muted" style="margin-top:4px">Broker: <b>{settings.broker}</b> · Mode: <b>{settings.trading_mode}</b> · Auto-refresh 15s</p>
+    {"<p class='err'>Broker error: "+err+"</p>" if err else ""}
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</div>
+  <div class="tab" data-tab="strategy" data-tab="strategy" onclick="switchTab('strategy')">Strategy</div>
+  <div class="tab" data-tab="settings" data-tab="settings" onclick="switchTab('settings')">Settings</div>
+  <div class="tab" data-tab="log" data-tab="log" onclick="switchTab('log')">Log</div>
+</div>
+
+<!-- OVERVIEW -->
+<div id="tab-overview" class="tab-content show">
+  <div class="card grid">
+    <div class="metric"><div class="label">Equity</div><div class="value">{equity}</div></div>
+    <div class="metric"><div class="label">Balance</div><div class="value">{balance}</div></div>
+    <div class="metric"><div class="label">Open trades</div><div class="value">{open_n}</div></div>
+    <div class="metric"><div class="label">Pairs</div><div class="value" style="font-size:14px">{settings.instruments.replace('XAU_USD','<span style="color:#ff6b35">XAU_USD</span>')}{'<br><span style="color:#ff6b35;font-size:12px">WARNING: XAU/USD high risk with this strategy</span>' if 'XAU_USD' in settings.instruments and selected == 'human_sr_h1_m15' else ''}</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Open trades</h2>
+    <table>
+      <tr><th>Pair</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>PnL</th><th>Opened</th><th>Closed</th></tr>
+      {rows_trades(opens)}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Recent closed</h2>
+    <table>
+      <tr><th>Pair</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>PnL</th><th>Opened</th><th>Closed</th></tr>
+      {rows_trades(list(reversed(closed)))}
+    </table>
+  </div>
+</div>
+
+<!-- STRATEGY -->
+<div id="tab-strategy" class="tab-content">
+  <div class="card">
+    <h2>Strategy preset</h2>
+    <form method="post" action="/set-strategy" class="row">
+      <select name="strategy_id" style="min-width:300px">
+        {''.join(options)}
+      </select>
+      <button type="submit">Apply</button>
+    </form>
+    <p class="muted" style="margin-top:12px"><b>{selected_meta['name']}</b><br/>{selected_meta['description']}</p>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="tab-settings" class="tab-content">
+  <div class="card">
+    <h2>Trading settings</h2>
+    <p class="muted">Changes take effect on next bot tick (no restart needed).</p>
+    <form method="post" action="/save-settings">
+      <div class="settings-grid">{fields_html}</div>
+      <div style="margin-top:16px"><button type="submit" style="min-width:200px">Save settings</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- LOG -->
+<div id="tab-log" class="tab-content">
+  <div class="card">
+    <h2>Event log</h2>
+    <table>
+      <tr><th>Time</th><th>Level</th><th>Message</th></tr>
+      {rows_events(events)}
+    </table>
+  </div>
+</div>
+
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def home() -> str:
+    return _page()
+
+
+@app.post("/stop")
+def stop_bot():
+    request_stop()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/set-strategy")
+def set_strategy(strategy_id: str = Form(...)):
+    set_selected_strategy_id(strategy_id)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/save-settings")
+def save_settings_endpoint(
+    position_sizing_mode: str = Form("risk_pct"),
+    fixed_lot_volume: float = Form(0.01),
+    risk_per_trade_pct: float = Form(0.75),
+    daily_loss_limit_pct: float = Form(3.0),
+    max_drawdown_pct: float = Form(8.0),
+    max_open_trades: int = Form(2),
+    max_trades_per_day: int = Form(8),
+    min_rr_ratio: float = Form(1.5),
+    cooldown_losses: int = Form(3),
+    cooldown_minutes: int = Form(60),
+    stop_loss_pips: float = Form(0.0),
+    take_profit_pips: float = Form(0.0),
+    trading_sessions: str = Form("london,newyork"),
+    # instruments from checkboxes
+    instr_EUR_USD: str = Form("0"),
+    instr_GBP_USD: str = Form("0"),
+    instr_XAU_USD: str = Form("0"),
+    loop_seconds: int = Form(60),
+):
+    # Build instruments string from checkboxes
+    checked = []
+    for inst, val in [("EUR_USD", instr_EUR_USD), ("GBP_USD", instr_GBP_USD), ("XAU_USD", instr_XAU_USD)]:
+        if val == "1":
+            checked.append(inst)
+    instruments_str = ",".join(checked) if checked else "EUR_USD,GBP_USD"
+
+    s = TraderSettings(
+        position_sizing_mode=position_sizing_mode,
+        fixed_lot_volume=fixed_lot_volume,
+        risk_per_trade_pct=risk_per_trade_pct,
+        daily_loss_limit_pct=daily_loss_limit_pct,
+        max_drawdown_pct=max_drawdown_pct,
+        max_open_trades=max_open_trades,
+        max_trades_per_day=max_trades_per_day,
+        min_rr_ratio=min_rr_ratio,
+        cooldown_losses=cooldown_losses,
+        cooldown_minutes=cooldown_minutes,
+        stop_loss_pips=stop_loss_pips,
+        take_profit_pips=take_profit_pips,
+        trading_sessions=trading_sessions,
+        instruments=instruments_str,
+        loop_seconds=loop_seconds,
+    )
+    save_settings(s)
+    return RedirectResponse(url="/#tab-settings", status_code=303)
+
+
+@app.get("/api/status")
+def api_status():
+    settings = get_settings()
+    store = Store(settings.db_path)
+    selected = get_selected_strategy_id(settings.strategy_id)
+    running = is_running()
+    try:
+        broker = make_broker(settings)
+        if settings.trading_mode == "paper" and hasattr(broker, "_open"):
+            for t in store.open_trades():
+                broker._open[t.id] = t
+        account = broker.get_account().model_dump()
+        if hasattr(broker, "shutdown"):
+            broker.shutdown()
+    except Exception as exc:
+        account = {"error": str(exc)}
+    return {
+        "running": running,
+        "pid": pid(),
+        "account": account,
+        "strategy_id": selected,
+        "strategies": list_strategies(),
+        "settings": load_settings().model_dump(),
+        "open_trades": [t.model_dump(mode="json") for t in store.open_trades()],
+        "events": [e.model_dump(mode="json") for e in store.recent_events(50)],
+    }
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}

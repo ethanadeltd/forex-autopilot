@@ -1,0 +1,17 @@
+{
+  "position_sizing_mode": "fixed_lot",
+  "fixed_lot_volume": 0.02,
+  "risk_per_trade_pct": 1.0,
+  "daily_loss_limit_pct": 5.0,
+  "max_drawdown_pct": 10.0,
+  "max_open_trades": 2,
+  "max_trades_per_day": 5,
+  "min_rr_ratio": 1.5,
+  "cooldown_losses": 3,
+  "cooldown_minutes": 60,
+  "stop_loss_pips": 20.0,
+  "take_profit_pips": 40.0,
+  "trading_sessions": "london,newyork",
+  "instruments": "EUR_USD,GBP_USD",
+  "loop_seconds": 60
+}
