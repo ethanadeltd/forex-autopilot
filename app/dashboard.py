@@ -293,23 +293,23 @@ def _page() -> str:
     <button type="button" onclick="testAI()" style="min-width:150px;margin-left:10px;background:#2563eb">Test AI connection</button>
     <span id="ai-test-result" style="margin-left:12px;font-size:14px"></span></div>
   <script>
-  function testAI() {
+  function testAI() {{
     const el = document.getElementById('ai-test-result');
     el.textContent = 'Testing...';
     el.style.color = '#9db0d0';
-    fetch('/api/test-ai').then(r => r.json()).then(d => {
-      if (d.ok) {
+    fetch('/api/test-ai').then(r => r.json()).then(d => {{
+      if (d.ok) {{
         el.textContent = '✅ Connected (' + d.model + ')';
         el.style.color = '#7dffa6';
-      } else {
+      }} else {{
         el.textContent = '❌ ' + (d.error || 'Failed');
         el.style.color = '#ff8e8e';
-      }
-    }).catch(e => {
+      }}
+    }}).catch(e => {{
       el.textContent = '❌ Request failed';
       el.style.color = '#ff8e8e';
-    });
-  }
+    }});
+  }}
   </script>
     </form>
   </div>
