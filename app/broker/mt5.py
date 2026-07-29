@@ -457,12 +457,10 @@ class MT5Broker:
             else:
                 updated.append(trade)
 
-        # Optionally import unknown MT5 positions opened by this magic
+        # Import all unknown MT5 positions (any magic) so dashboard shows them
         known = {str(t.broker_trade_id) for t in local_trades if t.broker_trade_id}
         for p in positions:
             if str(p.ticket) in known:
-                continue
-            if int(p.magic) != self.magic:
                 continue
             side = Side.BUY if int(p.type) == mt5.POSITION_TYPE_BUY else Side.SELL
             instrument = self._instrument_from_symbol(p.symbol)
@@ -522,3 +520,77 @@ class MT5Broker:
             return total
         except Exception:
             return 0.0
+
+    def import_closed_history(self, store, days: int = 30) -> None:
+        """Import recent closed positions from MT5 history into store."""
+        mt5 = self.mt5
+        from datetime import timedelta
+        from app.models import Side, Trade, TradeStatus
+        
+        now = datetime.now(timezone.utc)
+        try:
+            deals = mt5.history_deals_get(now - timedelta(days=days), now)
+            if not deals:
+                return
+            # Group deals by position_id to reconstruct closed trades
+            positions: dict[str, dict] = {}
+            for d in deals:
+                pos_id = str(getattr(d, "position_id", "") or "")
+                if not pos_id:
+                    continue
+                if pos_id not in positions:
+                    positions[pos_id] = {
+                        "profit": 0.0,
+                        "swap": 0.0,
+                        "commission": 0.0,
+                        "symbol": "",
+                        "side": None,
+                        "volume": 0.0,
+                        "price_open": 0.0,
+                        "price_close": 0.0,
+                        "time_open": None,
+                        "time_close": None,
+                    }
+                p = positions[pos_id]
+                p["profit"] += float(getattr(d, "profit", 0.0) or 0.0)
+                p["swap"] += float(getattr(d, "swap", 0.0) or 0.0)
+                p["commission"] += float(getattr(d, "commission", 0.0) or 0.0)
+                p["symbol"] = getattr(d, "symbol", "") or p["symbol"]
+                entry = float(getattr(d, "price", 0.0) or 0.0)
+                d_type = int(getattr(d, "type", -1))
+                if d_type in (0, 1):  # BUY(0)/SELL(1) deals
+                    if p["time_open"] is None:
+                        p["time_open"] = datetime.fromtimestamp(int(d.time), tz=timezone.utc)
+                        p["price_open"] = entry
+                        p["side"] = Side.BUY if d_type == 0 else Side.SELL
+                elif d_type in (1, 0):  # reverse
+                    p["time_close"] = datetime.fromtimestamp(int(d.time), tz=timezone.utc)
+                    p["price_close"] = entry
+            
+            existing = {t.broker_trade_id for t in store.list_trades() if t.broker_trade_id}
+            for pos_id, p in positions.items():
+                if pos_id in existing:
+                    continue
+                if not p["symbol"] or not p["time_close"]:
+                    continue
+                instrument = self._instrument_from_symbol(p["symbol"])
+                total_pnl = p["profit"] + p["swap"] + p["commission"]
+                trade = Trade(
+                    broker_trade_id=pos_id,
+                    instrument=instrument,
+                    side=p["side"] or Side.BUY,
+                    units=0,
+                    entry_price=p["price_open"],
+                    exit_price=p["price_close"],
+                    stop_loss=0.0,
+                    take_profit=0.0,
+                    pnl=total_pnl,
+                    status=TradeStatus.CLOSED,
+                    opened_at=p["time_open"] or now,
+                    closed_at=p["time_close"],
+                    rationale="imported-from-mt5-history",
+                    mode=self.mode,
+                )
+                store.save_trade(trade)
+        except Exception as exc:
+            logger.warning("Failed to import MT5 history: %s", exc)

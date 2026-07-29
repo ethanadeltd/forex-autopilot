@@ -78,6 +78,9 @@ def cmd_run(once: bool = False) -> None:
     try:
         acct = broker.get_account()
         risk.peak_equity = max(acct.equity, 0.01)  # use real balance, not hardcoded starting_equity
+        # Import recent MT5 trade history so dashboard shows past closed trades
+        if hasattr(broker, 'import_closed_history'):
+            broker.import_closed_history(store, days=30)
     except Exception:
         pass
 
