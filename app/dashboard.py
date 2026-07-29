@@ -332,7 +332,8 @@ def _page() -> str:
   <div class="card">
     <h2>Backtest strategy</h2>
     <p class="muted">Uses real MT5 historical data + current strategy. Runs for a few seconds.</p>
-    <div class="row" style="margin-bottom:12px;gap:8px">
+    <p class="muted">Uses real MT5 historical data + current human_sr_h1_m15 strategy. No AI API calls — pure technical analysis for accurate, fast results.</p>
+    <div class="row" style="margin-bottom:12px;gap:8px;flex-wrap:wrap">
       <select id="bt-instrument" style="min-width:140px">
         <option value="EUR_USD">EUR/USD</option>
         <option value="GBP_USD">GBP/USD</option>
@@ -344,9 +345,11 @@ def _page() -> str:
         <option value="6">6 months</option>
         <option value="12">12 months</option>
       </select>
+      <input type="number" id="bt-balance" value="10000" min="100" max="1000000" step="1000" style="width:130px" title="Starting balance" />
+      <span class="muted" style="font-size:13px">starting $</span>
       <button onclick="runBacktest()" style="min-width:160px">Run Backtest</button>
     </div>
-    <div id="bt-loading" style="display:none;color:#9db0d0;margin-bottom:12px">⏳ Running backtest...</div>
+    <div id="bt-loading" style="display:none;color:#9db0d0;margin-bottom:12px">⏳ Running backtest (this takes a few seconds)...</div>
     <div id="bt-results" style="display:none"></div>
   </div>
 </div>
@@ -355,11 +358,12 @@ def _page() -> str:
 function runBacktest() {{
   const inst = document.getElementById('bt-instrument').value;
   const months = document.getElementById('bt-months').value;
+  const balance = document.getElementById('bt-balance').value || 10000;
   const resultsDiv = document.getElementById('bt-results');
   const loading = document.getElementById('bt-loading');
   resultsDiv.style.display = 'none';
   loading.style.display = 'block';
-  fetch('/api/backtest?instrument=' + inst + '&months=' + months)
+  fetch('/api/backtest?instrument=' + inst + '&months=' + months + '&starting_equity=' + balance)
     .then(r => r.json())
     .then(d => {{
       loading.style.display = 'none';
@@ -368,22 +372,30 @@ function runBacktest() {{
         resultsDiv.style.display = 'block';
         return;
       }}
-      const pf = d.profit_factor || (d.wins > 0 && d.losses > 0 ? (d.pnl_positive / Math.abs(d.pnl_negative)) : 0);
+      const pnlStyle = d.pnl >= 0 ? 'color:#7dffa6' : 'color:#ff8e8e';
       resultsDiv.innerHTML = `
         <table>
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Instrument</td><td>${{d.instrument}}</td></tr>
           <tr><td>Period</td><td>${{d.months}} months</td></tr>
-          <tr><td>Data source</td><td>MT5 real history</td></tr>
+          <tr><td>Data source</td><td>${{d.data_source}}</td></tr>
+          <tr><td>AI used</td><td>${{d.ai_used ? 'Yes' : 'No (strategy-only)'}}</td></tr>
+          <tr><td>Starting balance</td><td>$${{Number(d.starting_equity).toLocaleString()}}</td></tr>
+          <tr><td>Ending equity</td><td>$${{Number(d.ending_equity).toLocaleString()}}</td></tr>
+          <tr><td>Total return</td><td style=${{pnlStyle}}>${{d.return_pct >= 0 ? '+' : ''}}${{d.return_pct}}%</td></tr>
+          <tr><td>Net PnL</td><td style=${{pnlStyle}}>${{d.pnl >= 0 ? '+' : ''}}$${{d.pnl.toLocaleString()}}</td></tr>
           <tr><td>Total trades</td><td>${{d.trades}}</td></tr>
           <tr><td>Wins</td><td style="color:#7dffa6">${{d.wins}}</td></tr>
           <tr><td>Losses</td><td style="color:#ff8e8e">${{d.losses}}</td></tr>
           <tr><td>Win rate</td><td>${{d.win_rate}}%</td></tr>
-          <tr><td>Net PnL</td><td style="color:${{d.pnl >= 0 ? '#7dffa6' : '#ff8e8e'}}">${{d.pnl >= 0 ? '+' : ''}}${{d.pnl}}</td></tr>
-          <tr><td>Ending equity</td><td>$${{d.ending_equity}}</td></tr>
-          <tr><td>Max drawdown</td><td style="color:#ff8e8e">${{d.max_drawdown_pct}}%</td></tr>
           <tr><td>Profit factor</td><td>${{d.profit_factor}}</td></tr>
-          <tr><td colspan="2" class="muted" style="font-size:12px">${{d.notes || ''}}</td></tr>
+          <tr><td>Sharpe ratio</td><td>${{d.sharpe}}</td></tr>
+          <tr><td>Max drawdown</td><td style="color:#ff8e8e">${{d.max_drawdown_pct}}%</td></tr>
+          <tr><td>Avg win</td><td style="color:#7dffa6">$${{d.avg_win}}</td></tr>
+          <tr><td>Avg loss</td><td style="color:#ff8e8e">-$${{Math.abs(d.avg_loss)}}</td></tr>
+          <tr><td>Max win streak</td><td>${{d.max_win_streak}}</td></tr>
+          <tr><td>Max loss streak</td><td>${{d.max_loss_streak}}</td></tr>
+          <tr><td colspan="2" class="muted" style="font-size:12px;padding-top:12px">${{d.notes || ''}}</td></tr>
         </table>
       `;
       resultsDiv.style.display = 'block';
@@ -505,28 +517,42 @@ def api_status():
 
 
 @app.get("/api/backtest")
-def run_backtest_api(instrument: str = "EUR_USD", months: int = 3):
-    """Run a quick backtest and return results."""
+def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equity: float = 10000.0):
+    """Run backtest with real MT5 historical data (strategy only, no AI API calls)."""
     try:
-        import io
-        import sys
-        from app.backtest.strategy_bt import run_strategy_backtest, BacktestResult
+        from app.backtest.strategy_bt import run_strategy_backtest
         
         settings = get_settings()
-        result = run_strategy_backtest(settings, instrument=instrument, months=months)
+        # Temporarily override starting equity for this backtest
+        original = settings.starting_equity
+        settings.starting_equity = starting_equity
+        try:
+            result = run_strategy_backtest(settings, instrument=instrument, months=months)
+        finally:
+            settings.starting_equity = original
+        
         return {
             "ok": True,
             "instrument": instrument,
             "months": months,
-            "trades": result.trades,
-            "wins": result.wins,
-            "losses": result.losses,
-            "win_rate": round(result.win_rate, 1),
-            "pnl": round(result.pnl, 2),
-            "ending_equity": round(result.ending_equity, 2),
-            "max_drawdown_pct": round(result.max_drawdown_pct, 2),
-            "profit_factor": round(result.profit_factor, 2) if hasattr(result, 'profit_factor') else 0,
-            "notes": result.notes,
+            "starting_equity": starting_equity,
+            "trades": result["total_trades"],
+            "wins": result["win_trades"],
+            "losses": result["loss_trades"],
+            "win_rate": result["win_rate_pct"],
+            "pnl": round(result["total_pnl"], 2),
+            "ending_equity": result["ending_equity"],
+            "max_drawdown_pct": result["max_drawdown_pct"],
+            "profit_factor": result["profit_factor"],
+            "sharpe": result["sharpe_annual"],
+            "return_pct": result["return_pct"],
+            "avg_win": result["avg_win"],
+            "avg_loss": result["avg_loss"],
+            "max_win_streak": result["max_win_streak"],
+            "max_loss_streak": result["max_loss_streak"],
+            "data_source": "MT5 real history",
+            "ai_used": False,
+            "notes": "Strategy-based backtest (human_sr_h1_m15). No AI API calls - uses technical analysis only for accuracy & speed.",
         }
     except Exception as exc:
         import traceback
