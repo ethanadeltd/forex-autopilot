@@ -16,6 +16,11 @@ SETTINGS_PATH = Path("data") / "trader_settings.json"
 
 
 class TraderSettings(BaseModel):
+    # --- AI ---
+    ai_provider: str = "openai"
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.deepseek.com/v1"
+    openai_model: str = "deepseek-chat"
     # --- Position sizing ---
     # "fixed_lot" = use fixed_lot_volume
     # "risk_pct"   = use risk_per_trade_pct % of equity
@@ -202,5 +207,36 @@ def settings_schema() -> list[dict]:
             "min": 10,
             "max": 3600,
             "default": default.loop_seconds,
+        },
+        # --- AI settings ---
+        {
+            "key": "ai_provider",
+            "label": "AI provider",
+            "type": "select",
+            "options": [
+                {"value": "openai", "label": "OpenAI-compatible (DeepSeek, Grok, etc.)"},
+            ],
+            "default": default.ai_provider,
+        },
+        {
+            "key": "openai_api_key",
+            "label": "API key",
+            "type": "text",
+            "default": default.openai_api_key,
+            "hint": "Stored in trader_settings.json",
+        },
+        {
+            "key": "openai_base_url",
+            "label": "API base URL",
+            "type": "text",
+            "default": default.openai_base_url,
+            "hint": "https://api.deepseek.com/v1 / https://api.openai.com/v1 / https://api.x.ai/v1",
+        },
+        {
+            "key": "openai_model",
+            "label": "Model name",
+            "type": "text",
+            "default": default.openai_model,
+            "hint": "deepseek-chat / gpt-4o-mini / grok-2-latest",
         },
     ]

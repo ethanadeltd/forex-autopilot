@@ -148,6 +148,9 @@ def _page() -> str:
                 f'</div>'
             )
 
+    # AI status check (dashboard-side)
+    ai_status = "<span class='badge-stopped' id='ai-status-badge'>checking...</span>"
+
     return f"""
 <!doctype html>
 <html>
@@ -197,9 +200,27 @@ def _page() -> str:
     document.querySelector(`[data-tab="${{name}}"]`).classList.add('active');
     localStorage.setItem('autopilot-tab', name);
   }}
+  function checkAI() {{
+    fetch('/api/test-ai').then(r => r.json()).then(d => {{
+      const badge = document.getElementById('ai-status-badge');
+      if (d.ok) {{
+        badge.className = 'badge-running';
+        badge.textContent = 'AI: ' + (d.model || 'OK') + ' ✅';
+      }} else {{
+        badge.className = 'badge-stopped';
+        badge.textContent = 'AI: ' + (d.error || 'FAIL') + ' ❌';
+      }}
+    }}).catch(() => {{
+      const badge = document.getElementById('ai-status-badge');
+      badge.className = 'badge-stopped';
+      badge.textContent = 'AI: UNREACHABLE ❌';
+    }});
+  }}
   document.addEventListener('DOMContentLoaded', () => {{
     const saved = localStorage.getItem('autopilot-tab');
     if (saved) switchTab(saved);
+    checkAI();
+    setInterval(checkAI, 30000);
   }});
   </script>
 </head>
@@ -208,7 +229,7 @@ def _page() -> str:
 <div class="row" style="justify-content:space-between; margin-bottom:16px;">
   <div>
     <h1 style="display:inline">AI Forex Autopilot</h1>
-    <span style="margin-left:12px;">{status_badge} {stop_btn}</span>
+    <span style="margin-left:12px;">{status_badge} {stop_btn} {ai_status}</span>
     <p class="muted" style="margin-top:4px">Broker: <b>{settings.broker}</b> · Mode: <b>{settings.trading_mode}</b> · Auto-refresh 15s</p>
     {"<p class='err'>Broker error: "+err+"</p>" if err else ""}
   </div>
@@ -268,7 +289,28 @@ def _page() -> str:
     <p class="muted">Changes take effect on next bot tick (no restart needed).</p>
     <form method="post" action="/save-settings">
       <div class="settings-grid">{fields_html}</div>
-      <div style="margin-top:16px"><button type="submit" style="min-width:200px">Save settings</button></div>
+      <div style="margin-top:16px"><button type="submit" style="min-width:200px">Save settings</button>
+    <button type="button" onclick="testAI()" style="min-width:150px;margin-left:10px;background:#2563eb">Test AI connection</button>
+    <span id="ai-test-result" style="margin-left:12px;font-size:14px"></span></div>
+  <script>
+  function testAI() {
+    const el = document.getElementById('ai-test-result');
+    el.textContent = 'Testing...';
+    el.style.color = '#9db0d0';
+    fetch('/api/test-ai').then(r => r.json()).then(d => {
+      if (d.ok) {
+        el.textContent = '✅ Connected (' + d.model + ')';
+        el.style.color = '#7dffa6';
+      } else {
+        el.textContent = '❌ ' + (d.error || 'Failed');
+        el.style.color = '#ff8e8e';
+      }
+    }).catch(e => {
+      el.textContent = '❌ Request failed';
+      el.style.color = '#ff8e8e';
+    });
+  }
+  </script>
     </form>
   </div>
 </div>
@@ -326,6 +368,11 @@ def save_settings_endpoint(
     instr_GBP_USD: str = Form("0"),
     instr_XAU_USD: str = Form("0"),
     loop_seconds: int = Form(60),
+    # AI settings
+    ai_provider: str = Form("openai"),
+    openai_api_key: str = Form(""),
+    openai_base_url: str = Form("https://api.deepseek.com/v1"),
+    openai_model: str = Form("deepseek-chat"),
 ):
     # Build instruments string from checkboxes
     checked = []
@@ -350,6 +397,10 @@ def save_settings_endpoint(
         trading_sessions=trading_sessions,
         instruments=instruments_str,
         loop_seconds=loop_seconds,
+        ai_provider=ai_provider,
+        openai_api_key=openai_api_key,
+        openai_base_url=openai_base_url,
+        openai_model=openai_model,
     )
     save_settings(s)
     return RedirectResponse(url="/#tab-settings", status_code=303)
@@ -381,6 +432,41 @@ def api_status():
         "open_trades": [t.model_dump(mode="json") for t in store.open_trades()],
         "events": [e.model_dump(mode="json") for e in store.recent_events(50)],
     }
+
+
+@app.get("/api/test-ai")
+def test_ai():
+    """Test the AI API connection with a simple ping."""
+    ts = load_settings()
+    if not ts.openai_api_key:
+        return {"ok": False, "error": "No API key configured"}
+    try:
+        import httpx
+        import json
+        headers = {
+            "Authorization": f"Bearer {ts.openai_api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": ts.openai_model or "deepseek-chat",
+            "temperature": 0.1,
+            "messages": [
+                {"role": "user", "content": "Reply with only the word OK."}
+            ],
+            "max_tokens": 10,
+        }
+        with httpx.Client(base_url=ts.openai_base_url, timeout=15.0) as client:
+            resp = client.post("/chat/completions", headers=headers, json=body)
+            resp.raise_for_status()
+            reply = resp.json()["choices"][0]["message"]["content"].strip()
+            return {
+                "ok": True,
+                "model": ts.openai_model,
+                "provider": ts.openai_base_url,
+                "reply": reply,
+            }
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @app.get("/health")
