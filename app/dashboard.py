@@ -240,6 +240,7 @@ def _page() -> str:
   <div class="tab" data-tab="strategy" data-tab="strategy" onclick="switchTab('strategy')">Strategy</div>
   <div class="tab" data-tab="settings" data-tab="settings" onclick="switchTab('settings')">Settings</div>
   <div class="tab" data-tab="log" data-tab="log" onclick="switchTab('log')">Log</div>
+  <div class="tab" data-tab="backtest" data-tab="backtest" onclick="switchTab('backtest')">Backtest</div>
 </div>
 
 <!-- OVERVIEW -->
@@ -325,6 +326,75 @@ def _page() -> str:
     </table>
   </div>
 </div>
+
+<!-- BACKTEST -->
+<div id="tab-backtest" class="tab-content">
+  <div class="card">
+    <h2>Backtest strategy</h2>
+    <p class="muted">Uses real MT5 historical data + current strategy. Runs for a few seconds.</p>
+    <div class="row" style="margin-bottom:12px;gap:8px">
+      <select id="bt-instrument" style="min-width:140px">
+        <option value="EUR_USD">EUR/USD</option>
+        <option value="GBP_USD">GBP/USD</option>
+        <option value="XAU_USD">XAU/USD (Gold)</option>
+      </select>
+      <select id="bt-months" style="min-width:100px">
+        <option value="1">1 month</option>
+        <option value="3" selected>3 months</option>
+        <option value="6">6 months</option>
+        <option value="12">12 months</option>
+      </select>
+      <button onclick="runBacktest()" style="min-width:160px">Run Backtest</button>
+    </div>
+    <div id="bt-loading" style="display:none;color:#9db0d0;margin-bottom:12px">⏳ Running backtest...</div>
+    <div id="bt-results" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+function runBacktest() {{
+  const inst = document.getElementById('bt-instrument').value;
+  const months = document.getElementById('bt-months').value;
+  const resultsDiv = document.getElementById('bt-results');
+  const loading = document.getElementById('bt-loading');
+  resultsDiv.style.display = 'none';
+  loading.style.display = 'block';
+  fetch('/api/backtest?instrument=' + inst + '&months=' + months)
+    .then(r => r.json())
+    .then(d => {{
+      loading.style.display = 'none';
+      if (!d.ok) {{
+        resultsDiv.innerHTML = '<p class="err">Error: ' + (d.error || 'Unknown') + '</p>';
+        resultsDiv.style.display = 'block';
+        return;
+      }}
+      const pf = d.profit_factor || (d.wins > 0 && d.losses > 0 ? (d.pnl_positive / Math.abs(d.pnl_negative)) : 0);
+      resultsDiv.innerHTML = `
+        <table>
+          <tr><th>Metric</th><th>Value</th></tr>
+          <tr><td>Instrument</td><td>${{d.instrument}}</td></tr>
+          <tr><td>Period</td><td>${{d.months}} months</td></tr>
+          <tr><td>Data source</td><td>MT5 real history</td></tr>
+          <tr><td>Total trades</td><td>${{d.trades}}</td></tr>
+          <tr><td>Wins</td><td style="color:#7dffa6">${{d.wins}}</td></tr>
+          <tr><td>Losses</td><td style="color:#ff8e8e">${{d.losses}}</td></tr>
+          <tr><td>Win rate</td><td>${{d.win_rate}}%</td></tr>
+          <tr><td>Net PnL</td><td style="color:${{d.pnl >= 0 ? '#7dffa6' : '#ff8e8e'}}">${{d.pnl >= 0 ? '+' : ''}}${{d.pnl}}</td></tr>
+          <tr><td>Ending equity</td><td>$${{d.ending_equity}}</td></tr>
+          <tr><td>Max drawdown</td><td style="color:#ff8e8e">${{d.max_drawdown_pct}}%</td></tr>
+          <tr><td>Profit factor</td><td>${{d.profit_factor}}</td></tr>
+          <tr><td colspan="2" class="muted" style="font-size:12px">${{d.notes || ''}}</td></tr>
+        </table>
+      `;
+      resultsDiv.style.display = 'block';
+    }})
+    .catch(e => {{
+      loading.style.display = 'none';
+      resultsDiv.innerHTML = '<p class="err">Request failed: ' + e + '</p>';
+      resultsDiv.style.display = 'block';
+    }});
+}}
+</script>
 
 </body>
 </html>
@@ -432,6 +502,35 @@ def api_status():
         "open_trades": [t.model_dump(mode="json") for t in store.open_trades()],
         "events": [e.model_dump(mode="json") for e in store.recent_events(50)],
     }
+
+
+@app.get("/api/backtest")
+def run_backtest_api(instrument: str = "EUR_USD", months: int = 3):
+    """Run a quick backtest and return results."""
+    try:
+        import io
+        import sys
+        from app.backtest.strategy_bt import run_strategy_backtest, BacktestResult
+        
+        settings = get_settings()
+        result = run_strategy_backtest(settings, instrument=instrument, months=months)
+        return {
+            "ok": True,
+            "instrument": instrument,
+            "months": months,
+            "trades": result.trades,
+            "wins": result.wins,
+            "losses": result.losses,
+            "win_rate": round(result.win_rate, 1),
+            "pnl": round(result.pnl, 2),
+            "ending_equity": round(result.ending_equity, 2),
+            "max_drawdown_pct": round(result.max_drawdown_pct, 2),
+            "profit_factor": round(result.profit_factor, 2) if hasattr(result, 'profit_factor') else 0,
+            "notes": result.notes,
+        }
+    except Exception as exc:
+        import traceback
+        return {"ok": False, "error": str(exc), "traceback": traceback.format_exc()}
 
 
 @app.get("/api/test-ai")
