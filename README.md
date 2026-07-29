@@ -105,15 +105,26 @@ MT5_SERVER=Exness-MT5Real   # your real server name
 
 Without an API key, the bot uses a technical heuristic.
 
+**DeepSeek (recommended):**
 ```env
-OPENAI_API_KEY=...
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-your-deepseek-key
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-chat
+```
+
+**OpenAI:**
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-your-openai-key
+OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-xAI:
-
+**xAI (Grok):**
 ```env
-OPENAI_API_KEY=...
+AI_PROVIDER=openai
+OPENAI_API_KEY=your-xai-key
 OPENAI_BASE_URL=https://api.x.ai/v1
 OPENAI_MODEL=grok-2-latest
 ```

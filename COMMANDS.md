@@ -111,7 +111,76 @@
     RISK_PER_TRADE_PCT = 0.75
 
 ============================================================
- QUICK START (FROM SCRATCH)
+ TRADING MACHINE SETUP (SECOND PC) — FULL GUIDE
+============================================================
+
+  Prerequisites:
+    - Python 3.12 installed (python.org)
+    - MetaTrader 5 installed + logged into Exness demo account
+    - Algo Trading enabled in MT5 (green toolbar button)
+    - Git installed (git-scm.com)
+
+  --- FIRST TIME SETUP ---
+
+  1. Open CMD as Administrator
+
+  2. Clone the repo:
+     cd C:\
+     git clone https://GITHUB_TOKEN@github.com/ethanadeltd/forex-autopilot.git
+     cd forex-autopilot
+
+  3. Create virtual env + install:
+     python -m venv .venv
+     .venv\Scripts\activate
+     pip install -r requirements.txt
+
+  4. Create .env from example:
+     copy .env.example .env
+     notepad .env
+     # Fill in your Exness MT5 credentials + DeepSeek API key + Telegram token
+
+  5. Test MT5 connection:
+     python main.py mt5-test
+
+  --- START THE BOT (Terminal 1) ---
+
+  cd C:\forex-autopilot
+  .venv\Scripts\activate
+  python main.py run
+
+  --- START THE DASHBOARD (Terminal 2) ---
+
+  cd C:\forex-autopilot
+  .venv\Scripts\activate
+  python main.py dashboard --host 0.0.0.0 --port 8787
+
+  Then open http://192.168.18.4:8787 on any PC in your network.
+
+  --- REMOTE ACCESS (from outside your home network) ---
+
+  Install ngrok and run:
+    winget install ngrok
+    ngrok http 8787
+
+  It gives you a public URL like https://abc123.ngrok-free.app
+
+  --- UPDATE THE BOT (pull latest code) ---
+
+  cd C:\forex-autopilot
+  git pull
+  .venv\Scripts\activate
+  python main.py run   (restart bot)
+
+  --- DEV WORKFLOW (developer machine) ---
+
+  1. Code changes on dev PC
+  2. git add . && git commit -m "description"
+  3. git push
+  4. On trading machine: git pull
+  5. Restart bot
+
+============================================================
+ QUICK START (FROM SCRATCH) — DEV MACHINE
 ============================================================
 
   1. Open PowerShell (Window 1)
