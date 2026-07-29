@@ -76,6 +76,37 @@ def _page() -> str:
             )
         return "".join(out)
 
+    # Extract AI insights from recent events
+    ai_insights = []
+    has_ai_key = bool(settings.openai_api_key)
+    for e in events:
+        msg = e.message or ""
+        if "AI agrees" in msg or "AI caution" in msg:
+            ai_insights.append(e)
+            if len(ai_insights) >= 6:
+                break
+
+    def ai_insights_html(items):
+        if not items:
+            if has_ai_key:
+                return '<p class="muted">🤖 AI is configured — waiting for the next trading decision to see its opinion.</p>'
+            else:
+                return '<p class="muted">🤖 No AI API key configured. <a href="#tab-settings" onclick="switchTab(\'settings\')">Add one in Settings</a> to get AI second opinions.</p>'
+        out = []
+        for e in items:
+            msg = e.message or ""
+            ts = e.ts.isoformat(timespec='seconds') if hasattr(e, 'ts') else ''
+            if "AI agrees" in msg:
+                icon = "✅"
+            elif "AI caution" in msg:
+                icon = "⚠️"
+            else:
+                icon = "🤖"
+            out.append(f'<div style="margin-bottom:8px;padding:8px 10px;background:#0f1726;border-radius:8px;border-left:3px solid {"#7dffa6" if icon == "✅" else "#ff8e8e"}">'
+                f'<span style="font-size:13px">{icon} <b>{ts}</b> — {msg[:120]}</span>'
+                f'</div>')
+        return "".join(out)
+
     def rows_events(items):
         if not items:
             return "<tr><td colspan='3'>None</td></tr>"
@@ -266,6 +297,12 @@ def _page() -> str:
       <tr><th>Pair</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>PnL</th><th>Opened</th><th>Closed</th></tr>
       {rows_trades(list(reversed(closed)))}
     </table>
+  </div>
+
+  <div class="card">
+    <h2>🤖 AI second opinions</h2>
+    <p class="muted" style="margin-bottom:8px">When the strategy wants to trade, AI reviews the chart and either agrees ✅ or cautions ⚠️. Refreshes with each tick.</p>
+    {ai_insights_html(ai_insights)}
   </div>
 </div>
 
