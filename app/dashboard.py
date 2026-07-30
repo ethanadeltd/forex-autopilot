@@ -432,7 +432,7 @@ function runBacktest() {{
         resultsDiv.style.display = 'block';
         return;
       }}
-      pollBacktest(d.task_id);
+      pollBacktest(d.task_id, null, months + ' month(s) backtest');
     }})
     .catch(e => {{
       loading.style.display = 'none';
@@ -441,15 +441,18 @@ function runBacktest() {{
     }});
 }}
 
-function pollBacktest(taskId) {{
+function pollBacktest(taskId, startTime, label) {{
+  if (!startTime) startTime = Date.now();
   const resultsDiv = document.getElementById('bt-results');
   const loading = document.getElementById('bt-loading');
-  loading.textContent = '⏳ Running backtest (waiting for MT5 data, this can take 30-60s)...';
+  const elapsed = Math.floor((Date.now() - startTime) / 1000);
+  const dots = '.'.repeat(Math.min(Math.floor(elapsed / 2) % 6 + 1, 5));
+  loading.textContent = '⏳ ' + (label || 'Running backtest') + dots + ' (' + elapsed + 's)';
   fetch('/api/backtest-result/' + taskId)
     .then(r => r.json())
     .then(d => {{
       if (d.status === 'running') {{
-        setTimeout(() => pollBacktest(taskId), 3000);
+        setTimeout(() => pollBacktest(taskId, startTime, label), 2000);
         return;
       }}
       loading.style.display = 'none';
@@ -630,8 +633,8 @@ def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equi
                     "months": months,
                     "starting_equity": starting_equity,
                     "trades": result["total_trades"],
-                    "wins": result["win_trades"],
-                    "losses": result["loss_trades"],
+                    "wins": result["wins"],
+                    "losses": result["losses"],
                     "win_rate": result["win_rate_pct"],
                     "pnl": round(result["total_pnl"], 2),
                     "ending_equity": result["ending_equity"],
