@@ -1,4 +1,4 @@
-﻿"""Generate a proper DOCX handbook for the Forex Autopilot."""
+"""Generate a proper DOCX handbook for the Forex Autopilot."""
 
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
@@ -14,7 +14,7 @@ font = style.font
 font.name = 'Calibri'
 font.size = Pt(11)
 
-# â”€â”€ Title Page â”€â”€
+# ---- Title Page ----
 doc.add_paragraph()
 doc.add_paragraph()
 title = doc.add_paragraph()
@@ -33,27 +33,28 @@ run.font.color.rgb = RGBColor(0x47, 0x5a, 0x6b)
 doc.add_paragraph()
 ver = doc.add_paragraph()
 ver.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = ver.add_run('Version 1.0 â€” July 2026')
+run = ver.add_run('Version 1.0 - July 2026')
 run.font.size = Pt(12)
 run.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
 
 doc.add_page_break()
 
-# â”€â”€ Table of Contents â”€â”€
+# ---- Table of Contents ----
 doc.add_heading('Table of Contents', level=1)
 toc_items = [
     '1. Overview',
     '2. Quick Start',
     '3. Commands Reference',
     '4. Dashboard (Web UI)',
-    '5. Strategy â€” Human S/R (H1+M15)',
+    '5. Strategy - Human S/R (H1+M15)',
     '6. Configuration (.env)',
     '7. Exness / MT5 Setup',
     '8. AI Setup (DeepSeek)',
     '9. Risk Management',
     '10. Trading Machine Setup',
     '11. Updating the Bot',
-    '12. Safety & Warnings',
+    '12. Fresh Install on a New Computer',
+    '13. Safety & Warnings',
 ]
 for item in toc_items:
     p = doc.add_paragraph(item)
@@ -61,7 +62,7 @@ for item in toc_items:
 
 doc.add_page_break()
 
-# â”€â”€ 1. Overview â”€â”€
+# ---- 1. Overview ----
 doc.add_heading('1. Overview', level=1)
 doc.add_paragraph(
     'AI Forex Autopilot is an autonomous forex/gold trading bot that combines '
@@ -81,13 +82,13 @@ for b in bullets:
     doc.add_paragraph(b, style='List Bullet')
 
 doc.add_paragraph(
-    '\nâš ï¸ RISK WARNING: Trading forex can lose money fast. Default mode is PAPER. '
+    '\nRISK WARNING: Trading forex can lose money fast. Default mode is PAPER. '
     'This is software, not financial advice.'
 )
 
 doc.add_page_break()
 
-# â”€â”€ 2. Quick Start â”€â”€
+# ---- 2. Quick Start ----
 doc.add_heading('2. Quick Start', level=1)
 doc.add_paragraph('First time setup:')
 doc.add_paragraph('1. Open PowerShell as Administrator', style='List Number')
@@ -118,7 +119,7 @@ run.font.size = Pt(9)
 
 doc.add_page_break()
 
-# â”€â”€ 3. Commands Reference â”€â”€
+# ---- 3. Commands Reference ----
 doc.add_heading('3. Commands Reference', level=1)
 
 commands = [
@@ -154,23 +155,23 @@ for s in stops:
 
 doc.add_page_break()
 
-# â”€â”€ 4. Dashboard â”€â”€
+# ---- 4. Dashboard ----
 doc.add_heading('4. Dashboard (Web UI)', level=1)
 doc.add_paragraph(
     'The dashboard runs on http://127.0.0.1:8787 and auto-refreshes every 15 seconds. '
-    'Keep the dashboard terminal window open â€” use a second terminal for the trading bot.'
+    'Keep the dashboard terminal window open - use a second terminal for the trading bot.'
 )
 doc.add_paragraph('Dashboard tabs:')
 tabs = [
     ('Overview', 'Account equity/balance, open trades, recent closed trades, AI insights'),
     ('Strategy', 'Change strategy preset with description'),
-    ('Settings', 'Adjust risk, instruments, AI provider, SL/TP pips â€” changes take effect on next tick'),
+    ('Settings', 'Adjust risk, instruments, AI provider, SL/TP pips - changes take effect on next tick'),
     ('Log', 'Recent event log with timestamps'),
     ('Backtest', 'Run strategy backtests from the UI (runs in background)'),
 ]
 for name, desc in tabs:
     p = doc.add_paragraph()
-    run = p.add_run(f'â€¢ {name}: ')
+    run = p.add_run(name + ': ')
     run.bold = True
     p.add_run(desc)
 
@@ -182,26 +183,21 @@ for d in docs:
 
 doc.add_page_break()
 
-# â”€â”€ 5. Strategy â”€â”€
-doc.add_heading('5. Strategy â€” Human S/R (H1+M15)', level=1)
-doc.add_paragraph(
-    'Name: Human Support & Resistance â€” Multi-Timeframe Approach'
-)
-doc.add_paragraph(
-    'This strategy uses 4 timeframes to find high-probability entries:'
-)
+# ---- 5. Strategy ----
+doc.add_heading('5. Strategy - Human S/R (H1+M15)', level=1)
+doc.add_paragraph('Name: Human Support & Resistance - Multi-Timeframe Approach')
+doc.add_paragraph('This strategy uses 4 timeframes to find high-probability entries:')
 
-# Strategy table
 table = doc.add_table(rows=5, cols=2)
 table.style = 'Light Grid Accent 1'
 table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
 cells = [
     ('Timeframe', 'Role'),
-    ('Daily (D)', 'MACRO BIAS FILTER â€” never trade against the daily trend'),
-    ('4H', 'MEDIUM STRUCTURE â€” confirms trend, major swing S/R'),
-    ('H1', 'KEY LEVELS â€” entry S/R zones from swing highs/lows'),
-    ('M15', 'EXECUTION â€” wait for candle reaction at H1 level, then enter'),
+    ('Daily (D)', 'MACRO BIAS FILTER - never trade against the daily trend'),
+    ('4H', 'MEDIUM STRUCTURE - confirms trend, major swing S/R'),
+    ('H1', 'KEY LEVELS - entry S/R zones from swing highs/lows'),
+    ('M15', 'EXECUTION - wait for candle reaction at H1 level, then enter'),
 ]
 for i, (col1, col2) in enumerate(cells):
     row = table.rows[i]
@@ -217,15 +213,15 @@ doc.add_paragraph()
 p = doc.add_paragraph()
 run = p.add_run('Best for: ')
 run.bold = True
-p.add_run('EUR/USD âœ…  |  GBP/USD âœ…')
+p.add_run('EUR/USD  |  GBP/USD')
 p2 = doc.add_paragraph()
 run = p2.add_run('High risk: ')
 run.bold = True
-p2.add_run('XAU/USD (Gold) âš ï¸ â€” high volatility and drawdown')
+p2.add_run('XAU/USD (Gold) - high volatility and drawdown')
 
 doc.add_page_break()
 
-# â”€â”€ 6. Configuration â”€â”€
+# ---- 6. Configuration ----
 doc.add_heading('6. Configuration (.env file)', level=1)
 doc.add_paragraph('Key settings in .env (edit with Notepad or any text editor):')
 
@@ -255,7 +251,7 @@ for i, (k, v) in enumerate(settings_list, 1):
 
 doc.add_page_break()
 
-# â”€â”€ 7. Exness / MT5 Setup â”€â”€
+# ---- 7. Exness / MT5 Setup ----
 doc.add_heading('7. Exness / MT5 Setup', level=1)
 doc.add_paragraph('Follow these steps to connect the bot to your Exness demo account:')
 
@@ -272,7 +268,7 @@ doc.add_heading('Step 2: Enable Algo Trading', level=2)
 doc.add_paragraph('In MT5:')
 items = [
     'Click the Algo Trading button in the toolbar (must be green/on)',
-    'Tools â†’ Options â†’ Expert Advisors',
+    'Tools -> Options -> Expert Advisors',
     'Check "Allow algorithmic trading"',
 ]
 for item in items:
@@ -310,10 +306,10 @@ doc.add_paragraph('Only switch to live after demo results look acceptable.')
 
 doc.add_page_break()
 
-# â”€â”€ 8. AI Setup â”€â”€
+# ---- 8. AI Setup ----
 doc.add_heading('8. AI Setup (DeepSeek)', level=1)
 doc.add_paragraph(
-    'The AI provides second opinions on trades â€” it reviews the chart and either agrees '
+    'The AI provides second opinions on trades - it reviews the chart and either agrees '
     'or cautions. Without an API key, the bot uses pure technical analysis.'
 )
 doc.add_paragraph('Recommended: DeepSeek')
@@ -342,7 +338,7 @@ run.font.size = Pt(9)
 
 doc.add_page_break()
 
-# â”€â”€ 9. Risk â”€â”€
+# ---- 9. Risk ----
 doc.add_heading('9. Risk Management', level=1)
 doc.add_paragraph('Default risk parameters (all editable in .env or dashboard):')
 risks = [
@@ -365,7 +361,7 @@ doc.add_paragraph(
 
 doc.add_page_break()
 
-# â”€â”€ 10. Trading Machine Setup â”€â”€
+# ---- 10. Trading Machine Setup ----
 doc.add_heading('10. Trading Machine Setup (Second PC)', level=1)
 doc.add_paragraph('To run the bot on a dedicated machine:')
 steps = [
@@ -382,7 +378,7 @@ steps = [
     'python main.py mt5-test (verify connection)',
 ]
 for i, step in enumerate(steps, 1):
-    doc.add_paragraph(f'{i}. {step}', style='List Number')
+    doc.add_paragraph(str(i) + '. ' + step, style='List Number')
 
 doc.add_paragraph()
 doc.add_paragraph('Two terminals needed:')
@@ -400,7 +396,7 @@ run.font.size = Pt(9)
 
 doc.add_page_break()
 
-# â”€â”€ 11. Updating the Bot â”€â”€
+# ---- 11. Updating the Bot ----
 doc.add_heading('11. Updating the Bot', level=1)
 doc.add_paragraph(
     'When new features or fixes are pushed to GitHub, update the trading machine with a single command:'
@@ -431,32 +427,133 @@ run = code.add_run(
 run.font.name = 'Consolas'
 run.font.size = Pt(9)
 
+doc.add_heading('Restarting the Dashboard:', level=2)
+doc.add_paragraph('After updating, restart the dashboard too (separate terminal):')
+dash_steps = [
+    'Go to the dashboard terminal (Window 2)',
+    'Press Ctrl+C to stop the dashboard server',
+    'python main.py dashboard --host 0.0.0.0 --port 8787  (restart it)',
+]
+for s in dash_steps:
+    doc.add_paragraph(s, style='List Number')
+
+code = doc.add_paragraph()
+run = code.add_run(
+    '# Restart dashboard:\n'
+    'cd C:\\forex-autopilot\n'
+    '.venv\\Scripts\\activate\n'
+    'python main.py dashboard --host 0.0.0.0 --port 8787'
+)
+run.font.name = 'Consolas'
+run.font.size = Pt(9)
+
 doc.add_paragraph()
-doc.add_paragraph('On the developer machine (Alex\'s PC), the workflow is:', style='List Bullet')
+doc.add_paragraph('On the developer machine (your PC), the workflow is:')
 dev_steps = [
     'Make changes to the code',
     'git add . && git commit -m "description of changes"',
     'git push',
     'Trading machine: git pull (see above)',
-    'Restart the bot',
+    'Restart the bot + dashboard',
 ]
 for s in dev_steps:
     doc.add_paragraph(s, style='List Number')
 
 doc.add_page_break()
 
-# â”€â”€ 12. Safety â”€â”€
-doc.add_heading('12. Safety & Warnings', level=1)
-doc.add_paragraph('âš ï¸ Important safety information:')
+# ---- 12. Fresh Install on a New Computer ----
+doc.add_heading('12. Fresh Install on a New Computer', level=1)
+doc.add_paragraph(
+    'To set up the Forex Autopilot on a brand-new computer from scratch:'
+)
+
+doc.add_heading('Prerequisites', level=2)
+prereqs = [
+    'Windows 10 or 11',
+    'Python 3.12 or 3.13 (download from python.org - check "Add Python to PATH" during install)',
+    'Git (download from git-scm.com)',
+    'MetaTrader 5 from Exness website (if using Exness broker)',
+    'Internet connection (for pulling data and AI API calls)',
+]
+for p in prereqs:
+    doc.add_paragraph(p, style='List Bullet')
+
+doc.add_heading('Step-by-Step Installation', level=2)
+
+install_steps = [
+    ('Install Python', 'Download Python 3.12+ from python.org. During installation, CHECK "Add Python to PATH".'),
+    ('Install Git', 'Download from git-scm.com and install with default options.'),
+    ('Install MetaTrader 5', 'Download from the Exness website. Install and log into your demo account.'),
+    ('Enable Algo Trading', 'In MT5, click the Algo Trading button in the toolbar (must turn green). Go to Tools -> Options -> Expert Advisors and check "Allow algorithmic trading".'),
+    ('Open CMD or PowerShell', 'Right-click Start menu -> Windows PowerShell (Admin) or Terminal (Admin).'),
+    ('Clone the repository', 'Run: git clone https://github.com/ethanadeltd/forex-autopilot.git'),
+    ('Enter the project folder', 'Run: cd forex-autopilot'),
+    ('Create virtual environment', 'Run: python -m venv .venv'),
+    ('Activate virtual environment', 'Run: .venv\\Scripts\\activate'),
+    ('Install dependencies', 'Run: pip install -r requirements.txt'),
+    ('Create .env file', 'Run: copy .env.example .env'),
+    ('Edit .env with your credentials', 'Run: notepad .env  (fill in MT5 login, password, server, etc.)'),
+    ('Test MT5 connection', 'Run: python main.py mt5-test'),
+    ('Start the bot', 'Run: python main.py run'),
+    ('Start the dashboard (separate terminal)', 'Open a SECOND terminal, cd forex-autopilot, .venv\\Scripts\\activate, then run: python main.py dashboard --host 0.0.0.0 --port 8787'),
+]
+
+for num, (title, details) in enumerate(install_steps, 1):
+    p = doc.add_paragraph()
+    run = p.add_run(str(num) + '. ' + title)
+    run.bold = True
+    doc.add_paragraph('    ' + details)
+    if title == 'Clone the repository':
+        code = doc.add_paragraph()
+        run = code.add_run('    git clone https://github.com/ethanadeltd/forex-autopilot.git')
+        run.font.name = 'Consolas'
+        run.font.size = Pt(9)
+        doc.add_paragraph()
+    elif title == 'Activate virtual environment':
+        code = doc.add_paragraph()
+        run = code.add_run('    .venv\\Scripts\\activate')
+        run.font.name = 'Consolas'
+        run.font.size = Pt(9)
+        doc.add_paragraph()
+
+doc.add_heading('Updating on a New Computer', level=2)
+doc.add_paragraph('After the initial setup, you only need two commands to update:')
+code = doc.add_paragraph()
+run = code.add_run(
+    'cd C:\\forex-autopilot\n'
+    '.venv\\Scripts\\activate\n'
+    'git pull\n'
+    'pip install -r requirements.txt\n'
+    'python main.py run'
+)
+run.font.name = 'Consolas'
+run.font.size = Pt(9)
+
+doc.add_paragraph()
+doc.add_paragraph('And in a second terminal for the dashboard:')
+code = doc.add_paragraph()
+run = code.add_run(
+    'cd C:\\forex-autopilot\n'
+    '.venv\\Scripts\\activate\n'
+    'python main.py dashboard --host 0.0.0.0 --port 8787'
+)
+run.font.name = 'Consolas'
+run.font.size = Pt(9)
+
+doc.add_page_break()
+
+# ---- 13. Safety ----
+doc.add_heading('13. Safety & Warnings', level=1)
+doc.add_paragraph('Important safety information:')
 
 warnings = [
-    'Default mode is PAPER â€” no real money at risk',
+    'Default mode is PAPER - no real money at risk',
     'Test on demo (practice) for weeks before considering live',
     'Never risk money you cannot afford to lose',
     'Keep MT5 running AND Algo Trading enabled',
-    'Symbol names differ by account â€” use MT5_SYMBOL_MAP',
+    'Symbol names differ by account - use MT5_SYMBOL_MAP',
     'XAU/USD (Gold) is high risk with this strategy',
-    'Monitor the bot regularly â€” don\'t leave unattended for long periods',
+    'Monitor the bot regularly - do not leave unattended for long periods',
     'Always verify stop-loss and take-profit levels',
     'This is software, not financial advice',
 ]
@@ -468,7 +565,7 @@ doc.add_paragraph()
 # Footer
 footer = doc.add_paragraph()
 footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = footer.add_run('â€” End of Handbook â€”')
+run = footer.add_run('- End of Handbook -')
 run.font.size = Pt(11)
 run.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
 
