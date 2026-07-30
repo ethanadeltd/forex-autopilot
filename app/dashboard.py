@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import threading
+import uuid
+from typing import Any, Optional
+
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 
@@ -12,6 +16,10 @@ from app.strategies.registry import list_strategies
 from app.strategy_state import get_selected_strategy_id, set_selected_strategy_id
 
 app = FastAPI(title="AI Forex Autopilot Monitor")
+
+# Background backtest result cache
+_bt_results: dict[str, dict[str, Any]] = {}
+_bt_lock = threading.Lock()
 
 
 def _page() -> str:
@@ -400,9 +408,36 @@ function runBacktest() {{
   const loading = document.getElementById('bt-loading');
   resultsDiv.style.display = 'none';
   loading.style.display = 'block';
+  loading.textContent = '⏳ Starting backtest task...';
   fetch('/api/backtest?instrument=' + inst + '&months=' + months + '&starting_equity=' + balance)
     .then(r => r.json())
     .then(d => {{
+      if (!d.task_id) {{
+        loading.style.display = 'none';
+        resultsDiv.innerHTML = '<p class="err">Error: ' + (d.error || 'No task ID') + '</p>';
+        resultsDiv.style.display = 'block';
+        return;
+      }}
+      pollBacktest(d.task_id);
+    }})
+    .catch(e => {{
+      loading.style.display = 'none';
+      resultsDiv.innerHTML = '<p class="err">Request failed: ' + e + '</p>';
+      resultsDiv.style.display = 'block';
+    }});
+}}
+
+function pollBacktest(taskId) {{
+  const resultsDiv = document.getElementById('bt-results');
+  const loading = document.getElementById('bt-loading');
+  loading.textContent = '⏳ Running backtest (waiting for MT5 data, this can take 30-60s)...';
+  fetch('/api/backtest-result/' + taskId)
+    .then(r => r.json())
+    .then(d => {{
+      if (d.status === 'running') {{
+        setTimeout(() => pollBacktest(taskId), 3000);
+        return;
+      }}
       loading.style.display = 'none';
       if (!d.ok) {{
         resultsDiv.innerHTML = '<p class="err">Error: ' + (d.error || 'Unknown') + '</p>';
@@ -439,7 +474,7 @@ function runBacktest() {{
     }})
     .catch(e => {{
       loading.style.display = 'none';
-      resultsDiv.innerHTML = '<p class="err">Request failed: ' + e + '</p>';
+      resultsDiv.innerHTML = '<p class="err">Polling failed: ' + e + '</p>';
       resultsDiv.style.display = 'block';
     }});
 }}
@@ -555,45 +590,68 @@ def api_status():
 
 @app.get("/api/backtest")
 def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equity: float = 10000.0):
-    """Run backtest with real MT5 historical data (strategy only, no AI API calls)."""
-    try:
-        from app.backtest.strategy_bt import run_strategy_backtest
-        
-        settings = get_settings()
-        # Temporarily override starting equity for this backtest
-        original = settings.starting_equity
-        settings.starting_equity = starting_equity
+    """Start backtest in background thread, return task ID immediately."""
+    task_id = uuid.uuid4().hex[:12]
+    
+    with _bt_lock:
+        _bt_results[task_id] = {"status": "running", "progress": 0}
+    
+    def _run():
         try:
-            result = run_strategy_backtest(settings, instrument=instrument, months=months)
-        finally:
-            settings.starting_equity = original
-        
-        return {
-            "ok": True,
-            "instrument": instrument,
-            "months": months,
-            "starting_equity": starting_equity,
-            "trades": result["total_trades"],
-            "wins": result["win_trades"],
-            "losses": result["loss_trades"],
-            "win_rate": result["win_rate_pct"],
-            "pnl": round(result["total_pnl"], 2),
-            "ending_equity": result["ending_equity"],
-            "max_drawdown_pct": result["max_drawdown_pct"],
-            "profit_factor": result["profit_factor"],
-            "sharpe": result["sharpe_annual"],
-            "return_pct": result["return_pct"],
-            "avg_win": result["avg_win"],
-            "avg_loss": result["avg_loss"],
-            "max_win_streak": result["max_win_streak"],
-            "max_loss_streak": result["max_loss_streak"],
-            "data_source": "MT5 real history",
-            "ai_used": False,
-            "notes": "Strategy-based backtest (human_sr_h1_m15). No AI API calls - uses technical analysis only for accuracy & speed.",
-        }
-    except Exception as exc:
-        import traceback
-        return {"ok": False, "error": str(exc), "traceback": traceback.format_exc()}
+            from app.backtest.strategy_bt import run_strategy_backtest
+            
+            settings = get_settings()
+            original = settings.starting_equity
+            settings.starting_equity = starting_equity
+            try:
+                result = run_strategy_backtest(settings, instrument=instrument, months=months)
+            finally:
+                settings.starting_equity = original
+            
+            with _bt_lock:
+                _bt_results[task_id] = {
+                    "status": "done",
+                    "ok": True,
+                    "instrument": instrument,
+                    "months": months,
+                    "starting_equity": starting_equity,
+                    "trades": result["total_trades"],
+                    "wins": result["win_trades"],
+                    "losses": result["loss_trades"],
+                    "win_rate": result["win_rate_pct"],
+                    "pnl": round(result["total_pnl"], 2),
+                    "ending_equity": result["ending_equity"],
+                    "max_drawdown_pct": result["max_drawdown_pct"],
+                    "profit_factor": result["profit_factor"],
+                    "sharpe": result["sharpe_annual"],
+                    "return_pct": result["return_pct"],
+                    "avg_win": result["avg_win"],
+                    "avg_loss": result["avg_loss"],
+                    "max_win_streak": result["max_win_streak"],
+                    "max_loss_streak": result["max_loss_streak"],
+                    "data_source": "MT5 real history",
+                    "ai_used": False,
+                    "notes": "Strategy-based backtest (human_sr_h1_m15). No AI API calls.",
+                }
+        except Exception as exc:
+            import traceback
+            with _bt_lock:
+                _bt_results[task_id] = {"status": "done", "ok": False, "error": str(exc), "traceback": traceback.format_exc()}
+    
+    threading.Thread(target=_run, daemon=True).start()
+    return {"task_id": task_id, "status": "started"}
+
+
+@app.get("/api/backtest-result/{task_id}")
+def get_backtest_result(task_id: str):
+    """Poll for backtest result."""
+    with _bt_lock:
+        result = _bt_results.get(task_id)
+    if result is None:
+        return {"status": "not_found"}
+    if result["status"] == "running":
+        return {"status": "running"}
+    return result
 
 
 @app.get("/api/test-ai")

@@ -556,16 +556,16 @@ class MT5Broker:
                 p["swap"] += float(getattr(d, "swap", 0.0) or 0.0)
                 p["commission"] += float(getattr(d, "commission", 0.0) or 0.0)
                 p["symbol"] = getattr(d, "symbol", "") or p["symbol"]
-                entry = float(getattr(d, "price", 0.0) or 0.0)
-                d_type = int(getattr(d, "type", -1))
-                if d_type in (0, 1):  # BUY(0)/SELL(1) deals
-                    if p["time_open"] is None:
-                        p["time_open"] = datetime.fromtimestamp(int(d.time), tz=timezone.utc)
-                        p["price_open"] = entry
-                        p["side"] = Side.BUY if d_type == 0 else Side.SELL
-                elif d_type in (1, 0):  # reverse
+                deal_price = float(getattr(d, "price", 0.0) or 0.0)
+                d_entry = int(getattr(d, "entry", -1))
+                if d_entry == 0:  # DEAL_ENTRY_IN — opening
+                    p["time_open"] = datetime.fromtimestamp(int(d.time), tz=timezone.utc)
+                    p["price_open"] = deal_price
+                    d_type = int(getattr(d, "type", -1))
+                    p["side"] = Side.BUY if d_type == 0 else Side.SELL
+                elif d_entry == 1:  # DEAL_ENTRY_OUT — closing
                     p["time_close"] = datetime.fromtimestamp(int(d.time), tz=timezone.utc)
-                    p["price_close"] = entry
+                    p["price_close"] = deal_price
             
             existing = {t.broker_trade_id for t in store.list_trades() if t.broker_trade_id}
             for pos_id, p in positions.items():
