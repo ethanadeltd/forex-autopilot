@@ -141,7 +141,7 @@ def _page() -> str:
     # Settings form fields
     schema = settings_schema()
     fields_html = ""
-    current_instruments = [x.strip() for x in settings.instruments.split(",") if x.strip()]
+    current_instruments = [x.strip() for x in ts.instruments.split(",") if x.strip()]
     all_instruments = ["EUR_USD", "GBP_USD", "XAU_USD"]
     for f in schema:
         key = f["key"]
