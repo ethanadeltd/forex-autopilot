@@ -45,7 +45,7 @@ def _page() -> str:
 
     ts = load_settings()
     opens = store.open_trades()
-    events = store.recent_events(30)
+    events = store.recent_events(100)
     closed = [t for t in store.list_trades() if t.status.value == "closed"][-20:]
     selected_meta = next((p for p in presets if p["id"] == selected), presets[0])
 
@@ -117,14 +117,28 @@ def _page() -> str:
 
     def rows_events(items):
         if not items:
-            return "<tr><td colspan='3'>None</td></tr>"
+            return "<tr><td colspan='4'>None</td></tr>"
         out = []
         for e in items:
+            details = ""
+            if e.data:
+                parts = []
+                for k, v in e.data.items():
+                    if k == "meta":
+                        continue
+                    if isinstance(v, dict):
+                        for mk, mv in v.items():
+                            parts.append(f"{mk}={mv}")
+                    else:
+                        parts.append(f"{k}={v}")
+                if parts:
+                    details = " | ".join(parts)
             out.append(
                 "<tr>"
                 f"<td>{e.ts.isoformat(timespec='seconds')}</td>"
                 f"<td>{e.level}</td>"
                 f"<td>{e.message}</td>"
+                f"<td style='font-size:11px;color:#9db0d0;max-width:300px;word-break:break-word'>{details}</td>"
                 "</tr>"
             )
         return "".join(out)
@@ -366,7 +380,7 @@ def _page() -> str:
   <div class="card">
     <h2>Event log</h2>
     <table>
-      <tr><th>Time</th><th>Level</th><th>Message</th></tr>
+      <tr><th>Time</th><th>Level</th><th>Message</th><th>Details</th></tr>
       {rows_events(events)}
     </table>
   </div>
