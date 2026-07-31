@@ -1,4 +1,8 @@
 {
+  "ai_provider": "openai",
+  "openai_api_key": "sk-5379d647396741b18293311ad9e7b20d",
+  "openai_base_url": "https://api.deepseek.com/v1",
+  "openai_model": "deepseek-chat",
   "position_sizing_mode": "fixed_lot",
   "fixed_lot_volume": 0.02,
   "risk_per_trade_pct": 1.0,

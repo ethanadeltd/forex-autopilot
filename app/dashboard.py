@@ -174,6 +174,30 @@ def _page() -> str:
                 for inst in all_instruments
             )
             fields_html += f'<div class="field"><label>Instruments (uncheck to disable)</label><div>{cb}</div></div>'
+        elif key == "trading_sessions":
+            # Sessions as checkboxes — leave all unchecked to trade 24/7
+            current_sessions = [x.strip().lower() for x in ts.trading_sessions.split(",") if x.strip()]
+            all_sessions = [
+                ("sydney", "Sydney"),
+                ("tokyo", "Tokyo"),
+                ("london", "London"),
+                ("newyork", "New York"),
+            ]
+            session_cb = "".join(
+                f'<label style="display:inline-flex;align-items:center;gap:6px;margin-right:16px;cursor:pointer">'
+                f'<input type="checkbox" name="sess_{name}" value="1" {"checked" if name in current_sessions else ""} '
+                f'style="width:18px;height:18px;cursor:pointer"> {label}'
+                f'</label>'
+                for name, label in all_sessions
+            )
+            all_checked = len(current_sessions) == 0
+            fields_html += (
+                f'<div class="field"><label>Trading sessions</label><div>{session_cb}'
+                f'<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:#7dffa6">'
+                f'<input type="checkbox" name="sess_all" value="1" {"checked" if all_checked else ""} '
+                f'style="width:18px;height:18px;cursor:pointer"> 24/7 (all sessions)</label></div>'
+                f'<span class="hint">Uncheck all to trade around the clock</span></div>'
+            )
         elif f["type"] == "select":
             opts = "".join(
                 f'<option value="{o["value"]}" {"selected" if o["value"] == str(val) else ""}>{o["label"]}</option>'
@@ -638,11 +662,17 @@ def save_settings_endpoint(
     cooldown_minutes: int = Form(60),
     stop_loss_pips: float = Form(0.0),
     take_profit_pips: float = Form(0.0),
-    trading_sessions: str = Form("london,newyork"),
+    trading_sessions: str = Form(""),
     # instruments from checkboxes
     instr_EUR_USD: str = Form("0"),
     instr_GBP_USD: str = Form("0"),
     instr_XAU_USD: str = Form("0"),
+    # sessions from checkboxes (sess_all = 24/7)
+    sess_sydney: str = Form("0"),
+    sess_tokyo: str = Form("0"),
+    sess_london: str = Form("0"),
+    sess_newyork: str = Form("0"),
+    sess_all: str = Form("0"),
     loop_seconds: int = Form(60),
     # AI settings
     ai_provider: str = Form("openai"),
@@ -657,6 +687,16 @@ def save_settings_endpoint(
             checked.append(inst)
     instruments_str = ",".join(checked) if checked else "EUR_USD,GBP_USD"
 
+    # Build sessions string from checkboxes (sess_all / all unchecked = 24/7 trading)
+    if sess_all == "1":
+        sessions_str = ""
+    else:
+        sess_checked = []
+        for name, val in [("sydney", sess_sydney), ("tokyo", sess_tokyo), ("london", sess_london), ("newyork", sess_newyork)]:
+            if val == "1":
+                sess_checked.append(name)
+        sessions_str = ",".join(sess_checked)
+
     s = TraderSettings(
         position_sizing_mode=position_sizing_mode,
         fixed_lot_volume=fixed_lot_volume,
@@ -670,7 +710,7 @@ def save_settings_endpoint(
         cooldown_minutes=cooldown_minutes,
         stop_loss_pips=stop_loss_pips,
         take_profit_pips=take_profit_pips,
-        trading_sessions=trading_sessions,
+        trading_sessions=sessions_str,
         instruments=instruments_str,
         loop_seconds=loop_seconds,
         ai_provider=ai_provider,
