@@ -602,8 +602,14 @@ function pollBacktest(taskId, startTime, label) {{
 
 
 @app.get("/", response_class=HTMLResponse)
-def home() -> str:
-    return _page()
+def home() -> HTMLResponse:
+    """Serve the dashboard. No-cache headers force browsers to fetch fresh HTML
+    (prevents stale cached pages with old meta-refresh from persisting)."""
+    return HTMLResponse(content=_page(), headers={
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    })
 
 
 @app.post("/stop")
