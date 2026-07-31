@@ -391,8 +391,10 @@ def _page() -> str:
   <div class="card">
     <h2>Backtest strategy</h2>
     <p class="muted">Uses real MT5 historical data + current strategy. Runs for a few seconds.</p>
-    <p class="muted">Uses real MT5 historical data + current human_sr_h1_m15 strategy. No AI API calls — pure technical analysis for accurate, fast results.</p>
+    <p class="muted">Uses real MT5 historical data + current human_sr_h1_m15 strategy.</p>
     <div class="row" style="margin-bottom:12px;gap:8px;flex-wrap:wrap">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer" title="Calls the AI for each signal (costs API tokens). Applies the same confidence filter as live trading.">
+        <input type="checkbox" id="bt-ai" style="width:16px;height:16px;cursor:pointer"> 🤖 Use AI second opinions (confidence filter)</label>
       <select id="bt-instrument" style="min-width:140px">
         <option value="EUR_USD">EUR/USD</option>
         <option value="GBP_USD">GBP/USD</option>
@@ -418,12 +420,13 @@ function runBacktest() {{
   const inst = document.getElementById('bt-instrument').value;
   const months = document.getElementById('bt-months').value;
   const balance = document.getElementById('bt-balance').value || 10000;
+  const useAi = document.getElementById('bt-ai').checked ? 1 : 0;
   const resultsDiv = document.getElementById('bt-results');
   const loading = document.getElementById('bt-loading');
   resultsDiv.style.display = 'none';
   loading.style.display = 'block';
   loading.textContent = '⏳ Starting backtest task...';
-  fetch('/api/backtest?instrument=' + inst + '&months=' + months + '&starting_equity=' + balance)
+  fetch('/api/backtest?instrument=' + inst + '&months=' + months + '&starting_equity=' + balance + '&ai=' + useAi)
     .then(r => r.json())
     .then(d => {{
       if (!d.task_id) {{
@@ -432,7 +435,7 @@ function runBacktest() {{
         resultsDiv.style.display = 'block';
         return;
       }}
-      pollBacktest(d.task_id, null, months + ' month(s) backtest');
+      pollBacktest(d.task_id, null, (useAi ? '🤖 AI backtest' : months + ' month(s) backtest'));
     }})
     .catch(e => {{
       loading.style.display = 'none';
@@ -606,9 +609,10 @@ def api_status():
 
 
 @app.get("/api/backtest")
-def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equity: float = 10000.0):
+def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equity: float = 10000.0, ai: int = 0):
     """Start backtest in background thread, return task ID immediately."""
     task_id = uuid.uuid4().hex[:12]
+    use_ai = ai == 1
     
     with _bt_lock:
         _bt_results[task_id] = {"status": "running", "progress": 0}
@@ -621,7 +625,7 @@ def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equi
             original = settings.starting_equity
             settings.starting_equity = starting_equity
             try:
-                result = run_strategy_backtest(settings, instrument=instrument, months=months)
+                result = run_strategy_backtest(settings, instrument=instrument, months=months, use_ai=use_ai)
             finally:
                 settings.starting_equity = original
             
@@ -647,8 +651,8 @@ def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equi
                     "max_win_streak": result["max_win_streak"],
                     "max_loss_streak": result["max_loss_streak"],
                     "data_source": "MT5 real history",
-                    "ai_used": False,
-                    "notes": "Strategy-based backtest (human_sr_h1_m15). No AI API calls.",
+                    "ai_used": use_ai,
+                    "notes": "Strategy-based backtest (human_sr_h1_m15)" + (" + AI second opinions" if use_ai else ". No AI API calls."),
                 }
         except Exception as exc:
             import traceback

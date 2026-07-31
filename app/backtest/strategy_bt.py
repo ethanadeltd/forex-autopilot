@@ -20,10 +20,11 @@ if str(ROOT) not in sys.path:
 from app.broker.factory import _parse_symbol_map
 from app.broker.mt5 import MT5Broker
 from app.config import Settings, get_settings
-from app.models import Candle, Side, Trade, TradeStatus, SignalAction, PositionSize
+from app.models import Candle, Side, Trade, TradeStatus, SignalAction, PositionSize, MarketSnapshot
 from app.strategies.human_sr_h1_m15 import HumanSupportResistanceH1M15
 from app.strategies.base import StrategyContext
 from app.analysis.indicators import build_indicator_pack
+from app.analysis.ai_engine import AIEngine
 from app.risk.manager import RiskManager
 from app.sessions import in_trading_session
 
@@ -113,10 +114,16 @@ def run_strategy_backtest(
     settings: Settings,
     instrument: str = "EUR_USD",
     months: int = 6,
+    use_ai: bool = False,
 ) -> dict:
-    """Run human_sr_h1_m15 backtest on real MT5 data w/ direct trade management."""
+    """Run human_sr_h1_m15 backtest on real MT5 data w/ direct trade management.
+
+    use_ai=True calls the AI engine for each signal (same as live: confidence
+    adjustments + 0.62 gate). Costs API tokens; use_ai=False is strategy-only.
+    """
     
     strategy = HumanSupportResistanceH1M15()
+    ai = AIEngine(settings) if use_ai else None
     
     mins_per_month = months * 30 * 24 * 60
     m15_bars = mins_per_month // 15 + 1000
@@ -211,14 +218,13 @@ def run_strategy_backtest(
             day_key = new_day
             trades_today = 0
             daily_realized_pnl = 0.0
-            consecutive_losses = 0
-            cooldown_until = None
             halted = False
             halt_reason = ""
         
-        # Cooldown check
-        if cooldown_until and current_bar.time < cooldown_until:
-            pass  # skip entries, but still check stops
+        # Cooldown check — block NEW entries while cooldown is active (trades still close normally)
+        in_cooldown = cooldown_until is not None and current_bar.time < cooldown_until
+        if in_cooldown:
+            pass  # entries blocked below; SL/TP checks still run
         
         # --- Check SL/TP on open trades ---
         for tid in list(open_trades.keys()):
@@ -294,6 +300,10 @@ def run_strategy_backtest(
         if halted:
             continue
         
+        # Block new entries during cooldown (fixed: was a no-op before)
+        if in_cooldown:
+            continue
+        
         # Skip if already have open trade on this instrument
         if any(t["instrument"] == instrument for t in open_trades.values()):
             continue
@@ -333,6 +343,36 @@ def run_strategy_backtest(
         decision = strategy.evaluate(ctx)
         
         if decision.action not in (SignalAction.BUY, SignalAction.SELL):
+            continue
+        
+        # Optional AI second opinion — same logic as live engine
+        if ai is not None:
+            try:
+                snap = MarketSnapshot(
+                    instrument=instrument,
+                    timeframe="M15",
+                    candles=m15_window,
+                    indicators={
+                        **entry_ind,
+                        "h1_levels": (decision.meta or {}).get("h1_levels", {}),
+                        "higher_tf": "H1",
+                        "strategy_id": strategy.id,
+                        "strategy_rationale": decision.rationale,
+                    },
+                    mid_price=price,
+                )
+                ai_dec = ai.decide(snap, [], session_ok=True)
+                if ai_dec.action == SignalAction.HOLD and ai_dec.confidence >= 0.7:
+                    decision.confidence = min(decision.confidence, 0.55)
+                    decision.rationale = f"{decision.rationale} | AI caution: {ai_dec.rationale}"
+                elif ai_dec.action == decision.action:
+                    decision.confidence = min(0.92, decision.confidence + 0.05)
+                    decision.rationale = f"{decision.rationale} | AI agrees: {ai_dec.rationale}"
+            except Exception as exc:
+                console.print(f"[yellow]AI overlay failed (skipping): {exc}[/]")
+        
+        # Confidence gate — same as live RiskManager (0.62)
+        if ai is not None and decision.confidence < 0.62:
             continue
         
         # Min R:R check

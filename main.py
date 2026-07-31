@@ -272,6 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     bt2 = sub.add_parser("strategy-bt", help="Backtest human_sr_h1_m15 strategy (MTF: M15+H1+H4+Daily)")
     bt2.add_argument("--instrument", default="EUR_USD", help="EUR_USD, GBP_USD, XAU_USD")
     bt2.add_argument("--months", type=int, default=6, help="Months of data")
+    bt2.add_argument("--ai", action="store_true", help="Use AI second opinions + confidence filter (costs API tokens)")
     return p
 
 
@@ -291,7 +292,7 @@ def main() -> None:
     elif args.cmd == "strategy-bt":
         from app.backtest.strategy_bt import run_strategy_backtest, print_results
         settings = get_settings()
-        result = run_strategy_backtest(settings, instrument=args.instrument, months=args.months)
+        result = run_strategy_backtest(settings, instrument=args.instrument, months=args.months, use_ai=args.ai)
         print_results(result)
     else:
         parser.print_help()
