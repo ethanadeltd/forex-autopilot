@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.broker.factory import make_broker
 from app.config import get_settings
 from app.data.store import Store
+from app.models import TradeStatus
 from app.runtime import is_running, pid, request_stop, wait_for_stop
 from app.settings_manager import TraderSettings, load_settings, save_settings, settings_schema
 from app.strategies.registry import list_strategies
@@ -51,12 +52,12 @@ def _page() -> str:
 
     # Status badge
     status_badge = (
-        f'<span class="badge-running">RUNNING (PID {bot_pid})</span>'
+        f'<span class="badge-running" id="bot-status">RUNNING (PID {bot_pid})</span>'
         if running
-        else '<span class="badge-stopped">STOPPED</span>'
+        else '<span class="badge-stopped" id="bot-status">STOPPED</span>'
     )
     stop_btn = (
-        '<form method="post" action="/stop" style="display:inline"><button class="danger">STOP BOT</button></form>'
+        '<form method="post" action="/stop" style="display:inline"><button class="danger" id="stop-btn">STOP BOT</button></form>'
         if running
         else ""
     )
@@ -273,11 +274,9 @@ def _page() -> str:
     if (saved) switchTab(saved);
     checkAI();
     setInterval(checkAI, 30000);
-    // Auto-refresh every 15s via JS (skips while a backtest is running)
-    setInterval(() => {{
-      if (sessionStorage.getItem('bt-task')) return; // backtest in progress — don't reload
-      window.location.reload();
-    }}, 15000);
+    // Live refresh every 15s — fetches figures ONLY, no page reload (settings/backtest state preserved)
+    refreshLiveData();
+    setInterval(refreshLiveData, 15000);
     // Resume any backtest that was running before a reload
     const btTask = sessionStorage.getItem('bt-task');
     if (btTask) {{
@@ -288,6 +287,79 @@ def _page() -> str:
       }} catch (e) {{}}
     }}
   }});
+
+  // Fetch live figures from /api/status and update only the numbers in place
+  function refreshLiveData() {{
+    fetch('/api/status')
+      .then(r => r.json())
+      .then(d => {{
+        // Status badge + stop button
+        const badge = document.getElementById('bot-status');
+        if (badge) {{
+          if (d.running) {{
+            badge.className = 'badge-running';
+            badge.textContent = 'RUNNING (PID ' + d.pid + ')';
+            if (!document.getElementById('stop-btn')) {{
+              const stopHtml = '<form method="post" action="/stop" style="display:inline"><button class="danger" id="stop-btn">STOP BOT</button></form>';
+              badge.insertAdjacentHTML('afterend', stopHtml);
+            }}
+          }} else {{
+            badge.className = 'badge-stopped';
+            badge.textContent = 'STOPPED';
+            const stopBtn = document.getElementById('stop-btn');
+            if (stopBtn) stopBtn.closest('form').remove();
+          }}
+        }}
+        // Metrics
+        const acct = d.account || {{}};
+        const set = (id, val) => {{
+          const el = document.getElementById(id);
+          if (el && val !== undefined && val !== null) el.textContent = val;
+        }};
+        set('m-equity', acct.equity !== undefined ? Number(acct.equity).toFixed(2) : null);
+        set('m-balance', acct.balance !== undefined ? Number(acct.balance).toFixed(2) : null);
+        set('m-opens', acct.open_trades !== undefined ? acct.open_trades : null);
+        // Open trades table
+        const tOpen = document.getElementById('t-opens');
+        if (tOpen) {{
+          const opens = d.open_trades || [];
+          tOpen.innerHTML = opens.length ? opens.map(t => 
+            '<tr><td>' + t.instrument + '</td><td>' + (t.side || '') + '</td><td>' + (t.entry_price ?? '') + '</td><td>' + (t.stop_loss ?? '') + '</td><td>' + (t.take_profit ?? '') + '</td><td>' + (t.pnl ?? '') + '</td><td>' + (t.opened_at ? String(t.opened_at).slice(5,16) : '-') + '</td><td>' + (t.closed_at ? String(t.closed_at).slice(5,16) : '-') + '</td></tr>'
+          ).join('') : '<tr><td colspan="8">None</td></tr>';
+        }}
+        // Recent closed trades table
+        const tClosed = document.getElementById('t-closed');
+        if (tClosed) {{
+          const closed = d.closed_trades || [];
+          const closedRows = [...closed].reverse();
+          tClosed.innerHTML = closedRows.length ? closedRows.map(t => {{
+            const pnl = t.pnl ?? 0;
+            const pnlStyle = pnl > 0 ? 'color:#7dffa6' : (pnl < 0 ? 'color:#ff8e8e' : '');
+            return '<tr><td>' + t.instrument + '</td><td>' + (t.side || '') + '</td><td>' + (t.entry_price ?? '') + '</td><td>' + (t.stop_loss ?? '') + '</td><td>' + (t.take_profit ?? '') + '</td><td style="' + pnlStyle + '">' + Number(pnl).toFixed(2) + '</td><td>' + (t.opened_at ? String(t.opened_at).slice(5,16) : '-') + '</td><td>' + (t.closed_at ? String(t.closed_at).slice(5,16) : '-') + '</td></tr>';
+          }}).join('') : '<tr><td colspan="8">None</td></tr>';
+        }}
+        // Event log
+        const tEvents = document.getElementById('t-events');
+        if (tEvents) {{
+          const events = d.events || [];
+          tEvents.innerHTML = events.map(e => {{
+            let det = '';
+            if (e.data) {{
+              const parts = [];
+              for (const [k, v] of Object.entries(e.data)) {{
+                if (k === 'meta') continue;
+                if (v && typeof v === 'object') {{ for (const [mk, mv] of Object.entries(v)) parts.push(mk + '=' + mv); }}
+                else parts.push(k + '=' + v);
+              }}
+              det = parts.join(' | ');
+            }}
+            return '<tr><td>' + (e.ts || '').replace('T',' ').slice(0,19) + '</td><td>' + e.level + '</td><td>' + (e.message || '') + '</td><td style="font-size:11px;color:#9db0d0;max-width:300px;word-break:break-word">' + det + '</td></tr>';
+          }}).join('');
+        }}
+      }})
+      .catch(() => {{}});
+  }}
+
   function showBacktestLoading(msg) {{
     const loading = document.getElementById('bt-loading');
     const resultsDiv = document.getElementById('bt-results');
@@ -302,7 +374,7 @@ def _page() -> str:
   <div>
     <h1 style="display:inline">AI Forex Autopilot</h1>
     <span style="margin-left:12px;">{status_badge} {stop_btn} {ai_status}</span>
-    <p class="muted" style="margin-top:4px">Broker: <b>{settings.broker}</b> · Mode: <b>{settings.trading_mode}</b> · Auto-refresh 15s</p>
+    <p class="muted" style="margin-top:4px">Broker: <b>{settings.broker}</b> · Mode: <b>{settings.trading_mode}</b> · Auto-refresh 15s · live data</p>
     {"<p class='err'>Broker error: "+err+"</p>" if err else ""}
   </div>
 </div>
@@ -318,9 +390,9 @@ def _page() -> str:
 <!-- OVERVIEW -->
 <div id="tab-overview" class="tab-content show">
   <div class="card grid">
-    <div class="metric"><div class="label">Equity</div><div class="value">{equity}</div></div>
-    <div class="metric"><div class="label">Balance</div><div class="value">{balance}</div></div>
-    <div class="metric"><div class="label">Open trades</div><div class="value">{open_n}</div></div>
+    <div class="metric"><div class="label">Equity</div><div class="value" id="m-equity">{equity}</div></div>
+    <div class="metric"><div class="label">Balance</div><div class="value" id="m-balance">{balance}</div></div>
+    <div class="metric"><div class="label">Open trades</div><div class="value" id="m-opens">{open_n}</div></div>
     <div class="metric"><div class="label">Pairs</div><div class="value" style="font-size:14px">{settings.instruments.replace('XAU_USD','<span style="color:#ff6b35">XAU_USD</span>')}{'<br><span style="color:#ff6b35;font-size:12px">WARNING: XAU/USD high risk with this strategy</span>' if 'XAU_USD' in settings.instruments and selected == 'human_sr_h1_m15' else ''}</div></div>
   </div>
 
@@ -328,7 +400,7 @@ def _page() -> str:
     <h2>Open trades</h2>
     <table>
       <tr><th>Pair</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>PnL</th><th>Opened</th><th>Closed</th></tr>
-      {rows_trades(opens)}
+      <tbody id="t-opens">{rows_trades(opens)}</tbody>
     </table>
   </div>
 
@@ -336,7 +408,7 @@ def _page() -> str:
     <h2>Recent closed</h2>
     <table>
       <tr><th>Pair</th><th>Side</th><th>Entry</th><th>SL</th><th>TP</th><th>PnL</th><th>Opened</th><th>Closed</th></tr>
-      {rows_trades(list(reversed(closed)))}
+      <tbody id="t-closed">{rows_trades(list(reversed(closed)))}</tbody>
     </table>
   </div>
 
@@ -400,7 +472,7 @@ def _page() -> str:
     <h2>Event log</h2>
     <table>
       <tr><th>Time</th><th>Level</th><th>Message</th><th>Details</th></tr>
-      {rows_events(events)}
+      <tbody id="t-events">{rows_events(events)}</tbody>
     </table>
   </div>
 </div>
@@ -628,7 +700,8 @@ def api_status():
         "strategies": list_strategies(),
         "settings": load_settings().model_dump(),
         "open_trades": [t.model_dump(mode="json") for t in store.open_trades()],
-        "events": [e.model_dump(mode="json") for e in store.recent_events(50)],
+        "closed_trades": [t.model_dump(mode="json") for t in store.list_trades(TradeStatus.CLOSED)][-20:],
+        "events": [e.model_dump(mode="json") for e in store.recent_events(100)],
     }
 
 
