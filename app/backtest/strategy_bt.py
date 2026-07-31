@@ -115,6 +115,7 @@ def run_strategy_backtest(
     instrument: str = "EUR_USD",
     months: int = 6,
     use_ai: bool = False,
+    ai_veto_threshold: float = 0.62,
 ) -> dict:
     """Run human_sr_h1_m15 backtest on real MT5 data w/ direct trade management.
 
@@ -351,7 +352,7 @@ def run_strategy_backtest(
             continue
         
         # Optional AI second opinion — same logic as live engine, but with a
-        # REAL veto: AI saying HOLD (any confidence >= 0.55) blocks the trade,
+        # REAL veto: AI saying HOLD at/above the veto threshold blocks the trade,
         # because the strategy's own confidence is already 0.72+ and would
         # otherwise never be filtered. Stats are tracked to prove impact.
         ai_blocked = False
@@ -373,9 +374,9 @@ def run_strategy_backtest(
                 )
                 ai_dec = ai.decide(snap, [], session_ok=True)
                 if ai_dec.action == SignalAction.HOLD:
-                    # AI does NOT want to trade — real veto below the 0.62 gate
+                    # AI does NOT want to trade — veto only when it's reasonably sure
                     ai_stats["cautions"] += 1
-                    if ai_dec.confidence >= 0.55:
+                    if ai_dec.confidence >= ai_veto_threshold:
                         decision.confidence = 0.5
                         decision.rationale = f"{decision.rationale} | AI VETO (hold {ai_dec.confidence:.2f}): {ai_dec.rationale}"
                         ai_blocked = True
