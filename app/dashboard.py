@@ -209,7 +209,6 @@ def _page() -> str:
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="refresh" content="15" />
   <title>Forex Autopilot</title>
   <style>
     * {{ box-sizing: border-box; }}
@@ -274,7 +273,27 @@ def _page() -> str:
     if (saved) switchTab(saved);
     checkAI();
     setInterval(checkAI, 30000);
+    // Auto-refresh every 15s via JS (skips while a backtest is running)
+    setInterval(() => {{
+      if (sessionStorage.getItem('bt-task')) return; // backtest in progress — don't reload
+      window.location.reload();
+    }}, 15000);
+    // Resume any backtest that was running before a reload
+    const btTask = sessionStorage.getItem('bt-task');
+    if (btTask) {{
+      try {{
+        const t = JSON.parse(btTask);
+        showBacktestLoading('Resuming backtest…');
+        pollBacktest(t.task_id, t.start || Date.now(), t.label || 'Running backtest');
+      }} catch (e) {{}}
+    }}
   }});
+  function showBacktestLoading(msg) {{
+    const loading = document.getElementById('bt-loading');
+    const resultsDiv = document.getElementById('bt-results');
+    if (loading) {{ loading.style.display = 'block'; loading.textContent = msg; }}
+    if (resultsDiv) resultsDiv.style.display = 'none';
+  }}
   </script>
 </head>
 <body>
@@ -435,7 +454,7 @@ function runBacktest() {{
         resultsDiv.style.display = 'block';
         return;
       }}
-      pollBacktest(d.task_id, null, (useAi ? '🤖 AI backtest' : months + ' month(s) backtest'));
+      pollBacktest(d.task_id, Date.now(), (useAi ? '🤖 AI backtest' : months + ' month(s) backtest'));
     }})
     .catch(e => {{
       loading.style.display = 'none';
@@ -446,6 +465,8 @@ function runBacktest() {{
 
 function pollBacktest(taskId, startTime, label) {{
   if (!startTime) startTime = Date.now();
+  // Persist state so a page reload can resume the poll
+  sessionStorage.setItem('bt-task', JSON.stringify({{ task_id: taskId, start: startTime, label: label || '' }}));
   const resultsDiv = document.getElementById('bt-results');
   const loading = document.getElementById('bt-loading');
   const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -458,6 +479,8 @@ function pollBacktest(taskId, startTime, label) {{
         setTimeout(() => pollBacktest(taskId, startTime, label), 2000);
         return;
       }}
+      // Backtest finished — clear persisted state
+      sessionStorage.removeItem('bt-task');
       loading.style.display = 'none';
       if (!d.ok) {{
         resultsDiv.innerHTML = '<p class="err">Error: ' + (d.error || 'Unknown') + '</p>';
@@ -493,6 +516,7 @@ function pollBacktest(taskId, startTime, label) {{
       resultsDiv.style.display = 'block';
     }})
     .catch(e => {{
+      sessionStorage.removeItem('bt-task');
       loading.style.display = 'none';
       resultsDiv.innerHTML = '<p class="err">Polling failed: ' + e + '</p>';
       resultsDiv.style.display = 'block';
