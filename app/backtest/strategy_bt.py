@@ -124,6 +124,11 @@ def run_strategy_backtest(
     
     strategy = HumanSupportResistanceH1M15()
     ai = AIEngine(settings) if use_ai else None
+    # Track AI stats so we can see its real impact
+    ai_stats = {"calls": 0, "agrees": 0, "cautions": 0, "blocks": 0, "errors": 0}
+    # Sessions come from the dashboard settings (same as live) — empty = 24/7
+    from app.settings_manager import load_settings
+    session_list = load_settings().session_list
     
     mins_per_month = months * 30 * 24 * 60
     m15_bars = mins_per_month // 15 + 1000
@@ -337,7 +342,7 @@ def run_strategy_backtest(
             medium_indicators=medium_ind,
             macro_indicators=macro_ind,
             open_trades=[],
-            session_ok=True,
+            session_ok=in_trading_session(session_list, current_bar.time),
         )
         
         decision = strategy.evaluate(ctx)
@@ -345,8 +350,13 @@ def run_strategy_backtest(
         if decision.action not in (SignalAction.BUY, SignalAction.SELL):
             continue
         
-        # Optional AI second opinion — same logic as live engine
+        # Optional AI second opinion — same logic as live engine, but with a
+        # REAL veto: AI saying HOLD (any confidence >= 0.55) blocks the trade,
+        # because the strategy's own confidence is already 0.72+ and would
+        # otherwise never be filtered. Stats are tracked to prove impact.
+        ai_blocked = False
         if ai is not None:
+            ai_stats["calls"] += 1
             try:
                 snap = MarketSnapshot(
                     instrument=instrument,
@@ -362,17 +372,25 @@ def run_strategy_backtest(
                     mid_price=price,
                 )
                 ai_dec = ai.decide(snap, [], session_ok=True)
-                if ai_dec.action == SignalAction.HOLD and ai_dec.confidence >= 0.7:
-                    decision.confidence = min(decision.confidence, 0.55)
-                    decision.rationale = f"{decision.rationale} | AI caution: {ai_dec.rationale}"
+                if ai_dec.action == SignalAction.HOLD:
+                    # AI does NOT want to trade — real veto below the 0.62 gate
+                    ai_stats["cautions"] += 1
+                    if ai_dec.confidence >= 0.55:
+                        decision.confidence = 0.5
+                        decision.rationale = f"{decision.rationale} | AI VETO (hold {ai_dec.confidence:.2f}): {ai_dec.rationale}"
+                        ai_blocked = True
                 elif ai_dec.action == decision.action:
+                    ai_stats["agrees"] += 1
                     decision.confidence = min(0.92, decision.confidence + 0.05)
                     decision.rationale = f"{decision.rationale} | AI agrees: {ai_dec.rationale}"
             except Exception as exc:
+                ai_stats["errors"] += 1
                 console.print(f"[yellow]AI overlay failed (skipping): {exc}[/]")
         
         # Confidence gate — same as live RiskManager (0.62)
-        if ai is not None and decision.confidence < 0.62:
+        if ai is not None and (ai_blocked or decision.confidence < 0.62):
+            if ai_blocked:
+                ai_stats["blocks"] += 1
             continue
         
         # Min R:R check
@@ -488,6 +506,8 @@ def run_strategy_backtest(
         "max_loss_streak": max_loss_streak,
         "trades": trades_log,
         "pnls": closed_pnls,
+        "ai_stats": ai_stats,
+        "sessions": ",".join(session_list) if session_list else "24/7 (all sessions)",
     }
 
 
@@ -523,6 +543,15 @@ def print_results(r: dict) -> None:
     table.add_row("Sharpe (annual)", f"{r['sharpe_annual']:.2f}")
     table.add_row("Max win streak", str(r["max_win_streak"]))
     table.add_row("Max loss streak", str(r["max_loss_streak"]))
+    table.add_row("Sessions", r.get("sessions", ""))
+    if r.get("ai_stats"):
+        st = r["ai_stats"]
+        table.add_row("AI calls", str(st.get("calls", 0)))
+        table.add_row("AI agrees", str(st.get("agrees", 0)))
+        table.add_row("AI cautions", str(st.get("cautions", 0)))
+        table.add_row("AI vetoes (blocks)", str(st.get("blocks", 0)))
+        if st.get("errors"):
+            table.add_row("AI errors", str(st.get("errors", 0)), style="red")
     console.print(table)
     
     # Trade list

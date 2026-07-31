@@ -584,6 +584,14 @@ function pollBacktest(taskId, startTime, label) {{
         return;
       }}
       const pnlStyle = d.pnl >= 0 ? 'color:#7dffa6' : 'color:#ff8e8e';
+      let aiRows = '';
+      if (d.ai_stats) {{
+        aiRows = `
+          <tr><td>AI calls</td><td>${{d.ai_stats.calls || 0}}</td></tr>
+          <tr><td>AI agrees</td><td style="color:#7dffa6">${{d.ai_stats.agrees || 0}}</td></tr>
+          <tr><td>AI cautions (HOLD)</td><td style="color:#ffd700">${{d.ai_stats.cautions || 0}}</td></tr>
+          <tr><td>AI vetoes (blocked)</td><td style="color:#ff8e8e">${{d.ai_stats.blocks || 0}}</td></tr>`;
+      }}
       resultsDiv.innerHTML = `
         <table>
           <tr><th>Metric</th><th>Value</th></tr>
@@ -591,6 +599,7 @@ function pollBacktest(taskId, startTime, label) {{
           <tr><td>Period</td><td>${{d.months}} months</td></tr>
           <tr><td>Data source</td><td>${{d.data_source}}</td></tr>
           <tr><td>AI used</td><td>${{d.ai_used ? 'Yes' : 'No (strategy-only)'}}</td></tr>
+          <tr><td>Sessions</td><td>${{d.sessions || ''}}</td></tr>
           <tr><td>Starting balance</td><td>$${{Number(d.starting_equity).toLocaleString()}}</td></tr>
           <tr><td>Ending equity</td><td>$${{Number(d.ending_equity).toLocaleString()}}</td></tr>
           <tr><td>Total return</td><td style=${{pnlStyle}}>${{d.return_pct >= 0 ? '+' : ''}}${{d.return_pct}}%</td></tr>
@@ -606,8 +615,12 @@ function pollBacktest(taskId, startTime, label) {{
           <tr><td>Avg loss</td><td style="color:#ff8e8e">-$${{Math.abs(d.avg_loss)}}</td></tr>
           <tr><td>Max win streak</td><td>${{d.max_win_streak}}</td></tr>
           <tr><td>Max loss streak</td><td>${{d.max_loss_streak}}</td></tr>
+          ${{aiRows}}
           <tr><td colspan="2" class="muted" style="font-size:12px;padding-top:12px">${{d.notes || ''}}</td></tr>
         </table>
+        <div style="margin-top:12px">
+          <a href="/api/backtest-export/${{d.task_id || taskId}}" style="display:inline-block;padding:8px 16px;background:#1d4ed8;color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px">📥 Download CSV (all trades)</a>
+        </div>
       `;
       resultsDiv.style.display = 'block';
     }})
@@ -775,6 +788,7 @@ def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equi
             with _bt_lock:
                 _bt_results[task_id] = {
                     "status": "done",
+                    "task_id": task_id,
                     "ok": True,
                     "instrument": instrument,
                     "months": months,
@@ -795,6 +809,9 @@ def run_backtest_api(instrument: str = "EUR_USD", months: int = 3, starting_equi
                     "max_loss_streak": result["max_loss_streak"],
                     "data_source": "MT5 real history",
                     "ai_used": use_ai,
+                    "ai_stats": result.get("ai_stats", {}),
+                    "sessions": result.get("sessions", ""),
+                    "trades": result.get("trades", []),
                     "notes": "Strategy-based backtest (human_sr_h1_m15)" + (" + AI second opinions" if use_ai else ". No AI API calls."),
                 }
         except Exception as exc:
@@ -816,6 +833,44 @@ def get_backtest_result(task_id: str):
     if result["status"] == "running":
         return {"status": "running"}
     return result
+
+
+@app.get("/api/backtest-export/{task_id}")
+def export_backtest_csv(task_id: str):
+    """Download backtest trades as CSV."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    with _bt_lock:
+        result = _bt_results.get(task_id)
+    if result is None or result.get("status") != "done":
+        return JSONResponse({"ok": False, "error": "Result not found or still running"}, status_code=404)
+
+    trades = result.get("trades", [])
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "time", "side", "entry", "exit", "sl", "tp", "pnl", "result", "bars_held", "confidence", "rationale"
+    ])
+    for t in trades:
+        writer.writerow([
+            t.get("time", ""), t.get("side", ""), t.get("entry", ""), t.get("exit", ""),
+            t.get("sl", ""), t.get("tp", ""), t.get("pnl", ""), t.get("result", ""),
+            t.get("bars_held", ""), t.get("confidence", ""), t.get("rationale", ""),
+        ])
+    summary = (
+        f"# {result.get('instrument','')} {result.get('months',0)}mo "
+        f"pnl={result.get('pnl','')} trades={result.get('trades_count', len(trades))} "
+        f"winrate={result.get('win_rate','')}% pf={result.get('profit_factor','')} "
+        f"sessions={result.get('sessions','')} ai={result.get('ai_used', False)}\n"
+    )
+    filename = f"backtest_{result.get('instrument','bt')}_{result.get('months',0)}mo_{'ai' if result.get('ai_used') else 'noai'}.csv"
+    return Response(
+        content=summary + buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/test-ai")
